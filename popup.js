@@ -251,6 +251,7 @@
   elements.showUnknown.addEventListener('change', save);
   elements.keepSubscribed.addEventListener('change', save);
 
+
   storageGet().then((values) => {
     const normalized = normalizeConfig(values);
     writeFormValues(normalized);

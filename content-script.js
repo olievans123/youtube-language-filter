@@ -783,7 +783,7 @@
       '{ opacity: 1 !important; transition: opacity 0.18s ease !important; }',
       // Collapse hidden cards instantly
       roots.map(r => `${prefix} ${r}[${HIDDEN_ATTR}]`).join(','),
-      '{ display: none !important; }'
+      '{ display: none !important; }',
     ].join('\n');
     (document.head || document.documentElement).appendChild(style);
   };
