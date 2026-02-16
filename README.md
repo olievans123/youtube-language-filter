@@ -1,4 +1,4 @@
-# YouTube Language Filter
+# YouTube Language Filter for Safari
 
 Safari extension that hides YouTube videos not in your chosen language. Detects language from video titles using script analysis (CJK, kana, hangul) and function-word matching for Latin-script languages, then filters your feed in real time.
 
