@@ -50,6 +50,9 @@
   const HIDDEN_ATTR = 'data-lang-filter-hidden';
   const RETRY_ATTR = 'data-lang-filter-retries';
   const MAX_TITLE_RETRIES = 4;
+  const BATCHING_CLASS = 'yt-lang-filter-batching';
+  const MAX_BATCHING_MS = 850;
+  const MIN_BATCHING_MS = 140;
 
   const DEFAULTS = {
     enabled: true,
@@ -80,6 +83,9 @@
 
   let config = { ...DEFAULTS };
   let processTimer = null;
+  let batchingTimer = null;
+  let batchingReleaseTimer = null;
+  let batchingStartedAt = 0;
   let pendingElements = new Set();
   const titleLanguageCache = new Map();
 
@@ -638,10 +644,57 @@
     setCardHidden(element, shouldHide);
   };
 
-  const processVideoElements = () => {
-    if (!config.enabled) return;
+  const stopBatching = () => {
+    if (batchingTimer) {
+      clearTimeout(batchingTimer);
+      batchingTimer = null;
+    }
+    const body = document.body;
+    if (!body?.classList.contains(BATCHING_CLASS)) return;
 
-    if (pendingElements.size === 0) return;
+    if (batchingReleaseTimer) {
+      clearTimeout(batchingReleaseTimer);
+      batchingReleaseTimer = null;
+    }
+
+    const elapsedMs = Date.now() - batchingStartedAt;
+    const remainingMs = Math.max(0, MIN_BATCHING_MS - elapsedMs);
+    if (remainingMs > 0) {
+      batchingReleaseTimer = setTimeout(() => {
+        batchingReleaseTimer = null;
+        body.classList.remove(BATCHING_CLASS);
+      }, remainingMs);
+      return;
+    }
+
+    body.classList.remove(BATCHING_CLASS);
+  };
+
+  const startBatching = () => {
+    if (!config.enabled) return;
+    if (batchingReleaseTimer) {
+      clearTimeout(batchingReleaseTimer);
+      batchingReleaseTimer = null;
+    }
+    batchingStartedAt = Date.now();
+    document.body?.classList.add(BATCHING_CLASS);
+    if (batchingTimer) clearTimeout(batchingTimer);
+    batchingTimer = setTimeout(() => {
+      batchingTimer = null;
+      document.body?.classList.remove(BATCHING_CLASS);
+    }, MAX_BATCHING_MS);
+  };
+
+  const processVideoElements = () => {
+    if (!config.enabled) {
+      stopBatching();
+      return;
+    }
+
+    if (pendingElements.size === 0) {
+      stopBatching();
+      return;
+    }
 
     const elements = Array.from(pendingElements);
     pendingElements.clear();
@@ -684,11 +737,13 @@
     }
 
     if (hasPendingElements) {
-      scheduleProcessing(180);
+      scheduleProcessing(90);
+    } else {
+      stopBatching();
     }
   };
 
-  const scheduleProcessing = (delayMs = 30) => {
+  const scheduleProcessing = (delayMs = 20) => {
     clearTimeout(processTimer);
     processTimer = setTimeout(() => {
       processTimer = null;
@@ -699,6 +754,11 @@
   const reEvaluateAll = () => {
     pendingElements.clear();
     setFilterActive(config.enabled);
+    if (config.enabled) {
+      startBatching();
+    } else {
+      stopBatching();
+    }
 
     document.querySelectorAll(`[${PROCESSED_ATTR}], [${RETRY_ATTR}]`).forEach((el) => {
       el.removeAttribute(PROCESSED_ATTR);
@@ -707,10 +767,10 @@
     });
 
     queueElements(document);
-    scheduleProcessing(0);
+    scheduleProcessing(40);
   };
 
-  const queueAndProcess = (rootNode, delayMs = 30) => {
+  const queueAndProcess = (rootNode, delayMs = 20) => {
     queueElements(rootNode);
     if (pendingElements.size > 0) {
       scheduleProcessing(delayMs);
@@ -720,6 +780,33 @@
   // --- Subscribed channel detection (from sidebar) ---
 
   let subscribedChannelHrefs = null;
+  let subscribedChannelHydratePromise = null;
+
+  const normalizeChannelHref = (href) => {
+    if (typeof href !== 'string' || !href.trim()) return null;
+
+    let pathname = href.trim();
+    try {
+      const parsed = new URL(pathname, location.origin);
+      pathname = parsed.pathname || '';
+    } catch {}
+
+    pathname = pathname.split('?')[0].split('#')[0].toLowerCase();
+    if (!pathname.startsWith('/')) pathname = `/${pathname}`;
+
+    const parts = pathname.split('/').filter(Boolean);
+    if (parts.length === 0) return null;
+
+    const first = parts[0];
+    const second = parts[1];
+
+    if (first.startsWith('@')) return `/${first}`;
+    if ((first === 'channel' || first === 'c' || first === 'user') && second) {
+      return `/${first}/${second}`;
+    }
+
+    return null;
+  };
 
   const getSubscribedChannels = () => {
     if (subscribedChannelHrefs !== null) return subscribedChannelHrefs;
@@ -730,37 +817,90 @@
 
     for (const link of guide.querySelectorAll('a[href]')) {
       const href = link.getAttribute('href');
-      if (href && (href.startsWith('/@') || href.startsWith('/channel/'))) {
-        channels.add(href.split('?')[0].toLowerCase());
-      }
+      const normalized = normalizeChannelHref(href);
+      if (normalized) channels.add(normalized);
     }
 
     subscribedChannelHrefs = channels;
+    if (config.keepSubscribed) {
+      void hydrateSubscribedChannelsFromFeed();
+    }
     return channels;
+  };
+
+  const hydrateSubscribedChannelsFromFeed = () => {
+    if (!config.keepSubscribed) return Promise.resolve();
+    if (subscribedChannelHydratePromise) return subscribedChannelHydratePromise;
+
+    subscribedChannelHydratePromise = fetch('/feed/channels', { credentials: 'same-origin' })
+      .then((response) => (response.ok ? response.text() : ''))
+      .then((html) => {
+        if (!html || subscribedChannelHrefs === null) return;
+
+        let didAdd = false;
+        const addNormalized = (href) => {
+          const normalized = normalizeChannelHref(href);
+          if (!normalized || subscribedChannelHrefs.has(normalized)) return;
+          subscribedChannelHrefs.add(normalized);
+          didAdd = true;
+        };
+
+        try {
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          for (const link of doc.querySelectorAll('a[href]')) {
+            addNormalized(link.getAttribute('href'));
+          }
+        } catch {}
+
+        const escapedMatches = html.match(/\\\/(?:@[^"\\\/?]+|channel\\\/[A-Za-z0-9_-]+|c\\\/[A-Za-z0-9_.-]+|user\\\/[A-Za-z0-9_.-]+)/g) || [];
+        for (const escapedPath of escapedMatches) {
+          addNormalized(escapedPath.replace(/\\\//g, '/'));
+        }
+
+        const plainMatches = html.match(/\/(?:@[^"\/?]+|channel\/[A-Za-z0-9_-]+|c\/[A-Za-z0-9_.-]+|user\/[A-Za-z0-9_.-]+)/g) || [];
+        for (const plainPath of plainMatches) {
+          addNormalized(plainPath);
+        }
+
+        if (didAdd) {
+          reEvaluateAll();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        subscribedChannelHydratePromise = null;
+      });
+
+    return subscribedChannelHydratePromise;
   };
 
   const refreshSubscribedChannels = () => {
     subscribedChannelHrefs = null;
+    subscribedChannelHydratePromise = null;
   };
 
   const CHANNEL_LINK_SELECTORS = [
     'ytd-channel-name a[href]',
     '#channel-name a[href]',
     '#owner-name a[href]',
-    '#text a[href]'
+    '#text a[href]',
+    'yt-lockup-view-model a[href^="/@"]',
+    'yt-lockup-view-model a[href^="/channel/"]',
+    'yt-lockup-view-model a[href^="/c/"]',
+    'yt-lockup-view-model a[href^="/user/"]'
   ].join(',');
 
   const isSubscribedChannel = (videoElement) => {
     const channels = getSubscribedChannels();
     if (channels.size === 0) return false;
 
-    const channelLink = videoElement.querySelector(CHANNEL_LINK_SELECTORS);
-    if (!channelLink) return false;
+    for (const channelLink of videoElement.querySelectorAll(CHANNEL_LINK_SELECTORS)) {
+      const href = channelLink.getAttribute('href');
+      const normalized = normalizeChannelHref(href);
+      if (normalized && channels.has(normalized)) return true;
+    }
 
-    const href = channelLink.getAttribute('href');
-    if (!href) return false;
-
-    return channels.has(href.split('?')[0].toLowerCase());
+    return false;
   };
 
   // --- Anti-jitter CSS (hides unprocessed cards until classified) ---
@@ -772,17 +912,28 @@
     const style = document.createElement('style');
     style.id = FILTER_STYLE_ID;
     const prefix = 'body.yt-lang-filter-active';
+    const batchingPrefix = `html ${prefix}.${BATCHING_CLASS}`;
     const roots = CARD_ROOT_SELECTORS.split(',').map(s => s.trim());
 
     style.textContent = [
-      // Hide unprocessed cards so they don't flash before being filtered
+      // Hide unprocessed cards until classified (prevents pop-in on scroll)
       roots.map(r => `${prefix} ${r}:not([${PROCESSED_ATTR}])`).join(','),
-      '{ opacity: 0 !important; transition: opacity 0.18s ease !important; }',
-      // Smooth fade-in for processed (visible) cards
+      '{ opacity: 0 !important; }',
+      // Reveal processed, visible cards with a smooth fade-in
       roots.map(r => `${prefix} ${r}[${PROCESSED_ATTR}]:not([${HIDDEN_ATTR}])`).join(','),
-      '{ opacity: 1 !important; transition: opacity 0.18s ease !important; }',
+      '{ opacity: 1 !important; transition: opacity 0.15s ease !important; }',
+      // During full re-evaluations (back/home navigation), hide cards briefly
+      // and reveal in one batch to avoid card-by-card pop-in.
+      roots.map(r => `${batchingPrefix} ${r}`).join(','),
+      '{ opacity: 0 !important; transition: opacity 0.12s ease !important; }',
       // Collapse hidden cards instantly
       roots.map(r => `${prefix} ${r}[${HIDDEN_ATTR}]`).join(','),
+      '{ display: none !important; }',
+      // Prevent visible items from stretching into space left by hidden siblings
+      `${prefix} ytd-rich-item-renderer:not([${HIDDEN_ATTR}])`,
+      '{ flex-grow: 0 !important; }',
+      // Collapse grid rows where all items have been filtered out
+      `${prefix} ytd-rich-grid-row:not(:has(ytd-rich-item-renderer:not([${HIDDEN_ATTR}])))`,
       '{ display: none !important; }',
     ].join('\n');
     (document.head || document.documentElement).appendChild(style);
@@ -793,6 +944,7 @@
       document.body?.classList.add('yt-lang-filter-active');
     } else {
       document.body?.classList.remove('yt-lang-filter-active');
+      stopBatching();
     }
   };
 
