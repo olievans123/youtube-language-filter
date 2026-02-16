@@ -1,8 +1,6 @@
 # YouTube Language Filter
 
-Browser extension that hides YouTube videos not in your chosen language. Detects language from video titles using script analysis (CJK, kana, hangul) and function-word matching for Latin-script languages, then filters your feed in real time.
-
-Works on Chrome, Firefox, and Safari.
+Safari extension that hides YouTube videos not in your chosen language. Detects language from video titles using script analysis (CJK, kana, hangul) and function-word matching for Latin-script languages, then filters your feed in real time.
 
 ![YouTube Language Filter](screenshot.png)
 
@@ -50,12 +48,6 @@ Works on Chrome, Firefox, and Safari.
 
 ## Install
 
-**Chrome / Firefox**
-1. Clone this repo
-2. Open your browser's extension management page
-3. Enable developer mode and load the unpacked extension from the repo root
-
-**Safari**
 1. Open the Xcode project in `YouTubeLanguageFilter/`
 2. Build and run the app
 3. Enable the extension in Safari → Settings → Extensions
