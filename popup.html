@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>YouTube Language Filter</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="popup">
+    <header class="header">
+      <div class="header-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+      </div>
+      <h1>Language Filter</h1>
+    </header>
+
+    <section class="card">
+      <label class="toggle-row" for="enabled">
+        <span class="toggle-label">Enable filtering</span>
+        <input type="checkbox" id="enabled" class="toggle" checked />
+      </label>
+    </section>
+
+    <section class="card" id="langCard">
+      <p class="card-title">Show videos in</p>
+      <div class="language-options" id="languageOptions">
+        <label class="lang-option">
+          <input type="checkbox" value="en" checked />
+          <span class="lang-name">English</span>
+          <span class="lang-code">EN</span>
+        </label>
+        <label class="lang-option">
+          <input type="checkbox" value="es" />
+          <span class="lang-name">Spanish</span>
+          <span class="lang-code">ES</span>
+        </label>
+        <label class="lang-option">
+          <input type="checkbox" value="fr" />
+          <span class="lang-name">French</span>
+          <span class="lang-code">FR</span>
+        </label>
+        <label class="lang-option">
+          <input type="checkbox" value="zh" />
+          <span class="lang-name">Mandarin</span>
+          <span class="lang-code">ZH</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="card" id="subscribedCard">
+      <label class="toggle-row" for="keepSubscribed">
+        <div>
+          <span class="toggle-label">Keep subscriptions</span>
+          <span class="toggle-hint">Always show videos from channels you're subscribed to</span>
+        </div>
+        <input type="checkbox" id="keepSubscribed" class="toggle" checked />
+      </label>
+    </section>
+
+    <section class="card" id="unknownCard">
+      <label class="toggle-row" for="showUnknown">
+        <div>
+          <span class="toggle-label">Show undetected</span>
+          <span class="toggle-hint">Keep videos whose language can't be determined</span>
+        </div>
+        <input type="checkbox" id="showUnknown" class="toggle" checked />
+      </label>
+    </section>
+
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
