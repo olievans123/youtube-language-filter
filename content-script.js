@@ -86,6 +86,8 @@
   let batchingTimer = null;
   let batchingReleaseTimer = null;
   let batchingStartedAt = 0;
+  let lastRouteKey = '';
+  let lastPathname = '';
   let pendingElements = new Set();
   const titleLanguageCache = new Map();
 
@@ -439,7 +441,7 @@
 
     if (!rootNode?.querySelectorAll) return [];
 
-    if (rootNode instanceof Element) {
+    if (rootNode instanceof Element && !rootNode.closest('ytd-miniplayer')) {
       if (rootNode.matches(CARD_SELECTORS)) {
         const root = findCardRoot(rootNode) || rootNode;
         cards.add(root);
@@ -451,11 +453,13 @@
     }
 
     for (const element of rootNode.querySelectorAll(CARD_SELECTORS)) {
+      if (element.closest('ytd-miniplayer')) continue;
       const root = findCardRoot(element) || element;
       cards.add(root);
     }
 
     for (const link of rootNode.querySelectorAll(VIDEO_LINK_SELECTORS)) {
+      if (link.closest('ytd-miniplayer')) continue;
       const root = findCardRoot(link);
       if (root) cards.add(root);
     }
@@ -633,13 +637,46 @@
     return language;
   };
 
+  const getSearchQueryLanguageHints = () => {
+    if ((location.pathname || '') !== '/results') return [];
+
+    let rawQuery = '';
+    try {
+      const params = new URLSearchParams(location.search || '');
+      rawQuery = params.get('search_query') || params.get('query') || '';
+    } catch {
+      rawQuery = '';
+    }
+
+    const words = tokenize(rawQuery);
+    const hinted = new Set();
+
+    for (const word of words) {
+      if (SUPPORTED_LANGUAGE_CODES.has(word)) {
+        hinted.add(word);
+        continue;
+      }
+      const alias = LANGUAGE_ALIASES[word];
+      if (alias && SUPPORTED_LANGUAGE_CODES.has(alias)) {
+        hinted.add(alias);
+      }
+    }
+
+    return Array.from(hinted);
+  };
+
   const applyLanguageDecision = (element, language, selectedLanguages) => {
     const finalLanguage = language || 'unknown';
     element.setAttribute(PROCESSED_ATTR, finalLanguage);
     element.removeAttribute(RETRY_ATTR);
 
+    const hintedSearchLanguages = getSearchQueryLanguageHints();
+    const keepUnknownForSearch = language === null
+      && hintedSearchLanguages.length > 0
+      && hintedSearchLanguages.some((code) => selectedLanguages.has(code));
+
     const shouldHide = language === null
-      ? !config.showUnknown
+      ? !(config.showUnknown || keepUnknownForSearch)
       : !selectedLanguages.has(language);
     setCardHidden(element, shouldHide);
   };
@@ -761,6 +798,7 @@
     }
 
     document.querySelectorAll(`[${PROCESSED_ATTR}], [${RETRY_ATTR}]`).forEach((el) => {
+      if (el.closest('ytd-miniplayer')) return;
       el.removeAttribute(PROCESSED_ATTR);
       el.removeAttribute(HIDDEN_ATTR);
       el.removeAttribute(RETRY_ATTR);
@@ -775,6 +813,35 @@
     if (pendingElements.size > 0) {
       scheduleProcessing(delayMs);
     }
+  };
+
+  let navigationReEvalTimer = null;
+  const getCurrentRouteKey = () => `${location.pathname || ''}${location.search || ''}`;
+  const scheduleNavigationReEvaluate = (delayMs = 80) => {
+    if (navigationReEvalTimer) clearTimeout(navigationReEvalTimer);
+    navigationReEvalTimer = setTimeout(() => {
+      navigationReEvalTimer = null;
+      const nextRouteKey = getCurrentRouteKey();
+      const nextPathname = location.pathname || '';
+
+      if (nextRouteKey === lastRouteKey) {
+        queueAndProcess(document, 40);
+        return;
+      }
+
+      lastRouteKey = nextRouteKey;
+      lastPathname = nextPathname;
+
+      // Search results mutate heavily while preserving URL-ish state.
+      // Avoid full resets there; process incrementally.
+      if (nextPathname === '/results') {
+        queueAndProcess(document, 40);
+        return;
+      }
+
+      refreshSubscribedChannels();
+      reEvaluateAll();
+    }, delayMs);
   };
 
   // --- Subscribed channel detection (from sidebar) ---
@@ -956,6 +1023,8 @@
     subscribeToStorageChanges();
 
     loadConfig().then(() => {
+      lastRouteKey = getCurrentRouteKey();
+      lastPathname = location.pathname || '';
       setFilterActive(config.enabled);
       queueAndProcess(document, 0);
     });
@@ -973,14 +1042,15 @@
     observer.observe(document.body, { childList: true, subtree: true });
 
     window.addEventListener('yt-navigate-finish', () => {
-      refreshSubscribedChannels();
-      reEvaluateAll();
+      scheduleNavigationReEvaluate();
     });
     window.addEventListener('spfdone', () => {
-      refreshSubscribedChannels();
-      reEvaluateAll();
+      scheduleNavigationReEvaluate();
     });
-    window.addEventListener('yt-page-data-updated', () => reEvaluateAll());
+    // Search pages emit this event frequently while results stream in.
+    // Incremental queueing avoids full reset loops that keep cards in
+    // batching/hidden state indefinitely.
+    window.addEventListener('yt-page-data-updated', () => queueAndProcess(document, 40));
   };
 
   if (document.readyState === 'loading') {
