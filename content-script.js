@@ -362,10 +362,16 @@
   };
 
   const setCardHidden = (card, hidden) => {
+    const richItemWrapper = card instanceof Element
+      ? card.closest('ytd-rich-item-renderer')
+      : null;
+
     if (hidden) {
       card.setAttribute(HIDDEN_ATTR, 'true');
+      if (richItemWrapper) richItemWrapper.setAttribute(HIDDEN_ATTR, 'true');
     } else {
       card.removeAttribute(HIDDEN_ATTR);
+      if (richItemWrapper) richItemWrapper.removeAttribute(HIDDEN_ATTR);
     }
   };
 
@@ -800,7 +806,7 @@
       stopBatching();
     }
 
-    document.querySelectorAll(`[${PROCESSED_ATTR}], [${RETRY_ATTR}]`).forEach((el) => {
+    document.querySelectorAll(`[${PROCESSED_ATTR}], [${RETRY_ATTR}], [${HIDDEN_ATTR}]`).forEach((el) => {
       if (el.closest('ytd-miniplayer')) return;
       el.removeAttribute(PROCESSED_ATTR);
       el.removeAttribute(HIDDEN_ATTR);
@@ -1062,14 +1068,11 @@
       // Collapse hidden cards instantly
       roots.map(r => `${prefix} ${r}[${HIDDEN_ATTR}]`).join(','),
       '{ display: none !important; }',
-      // Collapse outer grid wrapper when inner media element is hidden
-      `${prefix} ytd-rich-item-renderer:has(ytd-rich-grid-media[${HIDDEN_ATTR}], ytd-rich-grid-slim-media[${HIDDEN_ATTR}])`,
-      '{ display: none !important; }',
       // Prevent visible items from stretching into space left by hidden siblings
-      `${prefix} ytd-rich-item-renderer:not([${HIDDEN_ATTR}]):not(:has([${HIDDEN_ATTR}]))`,
+      `${prefix} ytd-rich-item-renderer:not([${HIDDEN_ATTR}])`,
       '{ flex-grow: 0 !important; }',
       // Collapse grid rows where all items have been filtered out
-      `${prefix} ytd-rich-grid-row:not(:has(ytd-rich-item-renderer:not([${HIDDEN_ATTR}]):not(:has([${HIDDEN_ATTR}]))))`,
+      `${prefix} ytd-rich-grid-row:not(:has(ytd-rich-item-renderer:not([${HIDDEN_ATTR}])))`,
       '{ display: none !important; }',
     ].join('\n');
     (document.head || document.documentElement).appendChild(style);
