@@ -808,6 +808,19 @@
     scheduleProcessing(40);
   };
 
+  // Quietly reveal hidden cards that are now known to be from subscribed
+  // channels (e.g. after hydration adds new channels). Does not touch
+  // already-visible cards, so there is no flash.
+  const unhideSubscribedCards = () => {
+    if (!config.enabled || !config.keepSubscribed) return;
+    document.querySelectorAll(`[${HIDDEN_ATTR}]`).forEach((el) => {
+      if (el.closest('ytd-miniplayer')) return;
+      if (isSubscribedChannel(el)) {
+        el.removeAttribute(HIDDEN_ATTR);
+      }
+    });
+  };
+
   const queueAndProcess = (rootNode, delayMs = 20) => {
     queueElements(rootNode);
     if (pendingElements.size > 0) {
@@ -848,6 +861,7 @@
 
   let subscribedChannelHrefs = null;
   let subscribedChannelHydratePromise = null;
+  let hydratedChannelHrefs = null;
 
   const normalizeChannelHref = (href) => {
     if (typeof href !== 'string' || !href.trim()) return null;
@@ -880,16 +894,28 @@
 
     const channels = new Set();
     const guide = document.querySelector('ytd-guide-renderer');
-    if (!guide) return channels;
-
-    for (const link of guide.querySelectorAll('a[href]')) {
-      const href = link.getAttribute('href');
-      const normalized = normalizeChannelHref(href);
-      if (normalized) channels.add(normalized);
+    if (guide) {
+      for (const link of guide.querySelectorAll('a[href]')) {
+        const href = link.getAttribute('href');
+        const normalized = normalizeChannelHref(href);
+        if (normalized) channels.add(normalized);
+      }
     }
 
-    subscribedChannelHrefs = channels;
-    if (config.keepSubscribed) {
+    // Merge persistent hydrated data from /feed/channels
+    if (hydratedChannelHrefs) {
+      for (const href of hydratedChannelHrefs) {
+        channels.add(href);
+      }
+    }
+
+    // Only cache when we have data (sidebar or hydrated); otherwise
+    // leave null so subsequent calls re-check once the sidebar loads.
+    if (channels.size > 0 || guide) {
+      subscribedChannelHrefs = channels;
+    }
+
+    if (config.keepSubscribed && !hydratedChannelHrefs) {
       void hydrateSubscribedChannelsFromFeed();
     }
     return channels;
@@ -902,35 +928,51 @@
     subscribedChannelHydratePromise = fetch('/feed/channels', { credentials: 'same-origin' })
       .then((response) => (response.ok ? response.text() : ''))
       .then((html) => {
-        if (!html || subscribedChannelHrefs === null) return;
+        if (!html) return;
 
-        let didAdd = false;
-        const addNormalized = (href) => {
+        const fetched = new Set();
+        const collectHref = (href) => {
           const normalized = normalizeChannelHref(href);
-          if (!normalized || subscribedChannelHrefs.has(normalized)) return;
-          subscribedChannelHrefs.add(normalized);
-          didAdd = true;
+          if (normalized) fetched.add(normalized);
         };
 
         try {
           const doc = new DOMParser().parseFromString(html, 'text/html');
           for (const link of doc.querySelectorAll('a[href]')) {
-            addNormalized(link.getAttribute('href'));
+            collectHref(link.getAttribute('href'));
           }
         } catch {}
 
         const escapedMatches = html.match(/\\\/(?:@[^"\\\/?]+|channel\\\/[A-Za-z0-9_-]+|c\\\/[A-Za-z0-9_.-]+|user\\\/[A-Za-z0-9_.-]+)/g) || [];
         for (const escapedPath of escapedMatches) {
-          addNormalized(escapedPath.replace(/\\\//g, '/'));
+          collectHref(escapedPath.replace(/\\\//g, '/'));
         }
 
         const plainMatches = html.match(/\/(?:@[^"\/?]+|channel\/[A-Za-z0-9_-]+|c\/[A-Za-z0-9_.-]+|user\/[A-Za-z0-9_.-]+)/g) || [];
         for (const plainPath of plainMatches) {
-          addNormalized(plainPath);
+          collectHref(plainPath);
+        }
+
+        if (fetched.size === 0) return;
+
+        hydratedChannelHrefs = fetched;
+
+        // Merge into the live set (if cached) and trigger re-evaluation
+        let didAdd = false;
+        if (subscribedChannelHrefs) {
+          for (const href of fetched) {
+            if (!subscribedChannelHrefs.has(href)) {
+              subscribedChannelHrefs.add(href);
+              didAdd = true;
+            }
+          }
+        } else {
+          subscribedChannelHrefs = new Set(fetched);
+          didAdd = true;
         }
 
         if (didAdd) {
-          reEvaluateAll();
+          unhideSubscribedCards();
         }
       })
       .catch(() => {})
@@ -943,7 +985,8 @@
 
   const refreshSubscribedChannels = () => {
     subscribedChannelHrefs = null;
-    subscribedChannelHydratePromise = null;
+    // Preserve hydratedChannelHrefs and in-flight hydration promise —
+    // hydration only needs to run once per session.
   };
 
   const CHANNEL_LINK_SELECTORS = [
@@ -956,15 +999,33 @@
     'yt-lockup-view-model a[href^="/c/"]',
     'yt-lockup-view-model a[href^="/user/"]'
   ].join(',');
-
   const isSubscribedChannel = (videoElement) => {
     const channels = getSubscribedChannels();
-    if (channels.size === 0) return false;
+    const pageChannel = normalizeChannelHref(location.pathname);
 
-    for (const channelLink of videoElement.querySelectorAll(CHANNEL_LINK_SELECTORS)) {
-      const href = channelLink.getAttribute('href');
-      const normalized = normalizeChannelHref(href);
-      if (normalized && channels.has(normalized)) return true;
+    // Check per-card channel links against the subscribed set
+    let hasCardChannelLink = false;
+    if (channels.size > 0) {
+      for (const channelLink of videoElement.querySelectorAll(CHANNEL_LINK_SELECTORS)) {
+        hasCardChannelLink = true;
+        const href = channelLink.getAttribute('href');
+        const normalized = normalizeChannelHref(href);
+        if (normalized && channels.has(normalized)) return true;
+      }
+
+      // On channel pages, cards lack per-card channel links.
+      // Only fall back to page URL when the card has none of its own,
+      // since during SPA transitions location.pathname can be stale.
+      if (!hasCardChannelLink && pageChannel && channels.has(pageChannel)) return true;
+    }
+
+    // Last resort: on channel pages when the sidebar is collapsed and
+    // hydration hasn't completed yet, check the page's subscribe button.
+    if (!hasCardChannelLink && pageChannel) {
+      const subBtn = document.querySelector(
+        'ytd-subscribe-button-renderer[subscribed], ytd-subscribe-button-renderer[is-subscribed]'
+      );
+      if (subBtn) return true;
     }
 
     return false;

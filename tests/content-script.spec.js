@@ -16,7 +16,12 @@ function mixEl(id, mixLabel) {
     `</ytd-rich-item-renderer>`;
 }
 
-async function setup(page, cfg, videos, { waitForAttr = true, html = null } = {}) {
+async function setup(page, cfg, videos, {
+  waitForAttr = true,
+  html = null,
+  url = '/',
+  feedHtml = null
+} = {}) {
   const defaults = { enabled: true, selectedLanguage: 'en', showUnknown: true };
   const merged = { ...defaults, ...cfg };
 
@@ -26,7 +31,7 @@ async function setup(page, cfg, videos, { waitForAttr = true, html = null } = {}
   );
 
   // Mock browser.runtime messaging (mirrors background.js behaviour)
-  await page.evaluate((c) => {
+  await page.evaluate(({ c, pathUrl, mockFeedHtml }) => {
     const mockAPI = {
       runtime: {
         sendMessage: (msg) => {
@@ -40,7 +45,29 @@ async function setup(page, cfg, videos, { waitForAttr = true, html = null } = {}
     };
     window.browser = mockAPI;
     window.chrome = mockAPI;
-  }, merged);
+
+    if (typeof pathUrl === 'string' && pathUrl) {
+      try {
+        history.replaceState({}, '', pathUrl);
+      } catch {}
+    }
+
+    if (typeof mockFeedHtml === 'string') {
+      window.fetch = (input) => {
+        const target = typeof input === 'string' ? input : (input && input.url) || '';
+        if (target.includes('/feed/channels')) {
+          return Promise.resolve({
+            ok: true,
+            text: () => Promise.resolve(mockFeedHtml)
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          text: () => Promise.resolve('')
+        });
+      };
+    }
+  }, { c: merged, pathUrl: url, mockFeedHtml: feedHtml });
 
   await page.addScriptTag({ path: SCRIPT });
 
@@ -371,5 +398,53 @@ test.describe('filtering', () => {
     ]);
     await expect(el(page, 'v1')).toBeVisible();
     await expect(el(page, 'v2')).toBeVisible();
+  });
+});
+
+test.describe('subscription bypass', () => {
+  test('re-evaluates a hidden card when channel metadata is added later', async ({ page }) => {
+    await setup(
+      page,
+      { selectedLanguage: 'en', showUnknown: false, keepSubscribed: true },
+      [],
+      {
+        html:
+          '<ytd-guide-renderer><a href="/@subbed">Subbed</a></ytd-guide-renderer>' +
+          '<ytd-video-renderer data-test-id="lateSub">' +
+          '<a id="video-title-link" href="/watch?v=lateSub">Los mejores momentos del partido de esta temporada</a>' +
+          '<div id="meta"></div>' +
+          '</ytd-video-renderer>'
+      }
+    );
+
+    await expect(el(page, 'lateSub')).toBeHidden();
+
+    await page.evaluate(() => {
+      const meta = document.querySelector('[data-test-id="lateSub"] #meta');
+      if (meta) {
+        meta.innerHTML = '<ytd-channel-name><a href="/@subbed">Subbed</a></ytd-channel-name>';
+      }
+    });
+
+    await expect(el(page, 'lateSub')).toBeVisible();
+  });
+
+  test('hydrates subscribed channels from feed when guide is unavailable', async ({ page }) => {
+    await setup(
+      page,
+      { selectedLanguage: 'en', showUnknown: false, keepSubscribed: true },
+      [],
+      {
+        html:
+          '<ytd-video-renderer data-test-id="feedSub">' +
+          '<a id="video-title-link" href="/watch?v=feedSub">Los mejores momentos del partido de esta temporada</a>' +
+          '<ytd-channel-name><a href="/@feedsub">Feed Sub</a></ytd-channel-name>' +
+          '</ytd-video-renderer>',
+        url: '/results?search_query=videos',
+        feedHtml: '<a href="/@feedsub">Feed Sub</a>'
+      }
+    );
+
+    await expect(el(page, 'feedSub')).toBeVisible();
   });
 });
