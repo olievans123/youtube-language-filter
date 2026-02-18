@@ -810,9 +810,11 @@
 
   // Quietly reveal hidden cards that are now known to be from subscribed
   // channels (e.g. after hydration adds new channels). Does not touch
-  // already-visible cards, so there is no flash.
+  // already-visible cards, so there is no flash. Skips the homepage to
+  // avoid layout shifts on the main feed.
   const unhideSubscribedCards = () => {
     if (!config.enabled || !config.keepSubscribed) return;
+    if ((location.pathname || '/') === '/') return;
     document.querySelectorAll(`[${HIDDEN_ATTR}]`).forEach((el) => {
       if (el.closest('ytd-miniplayer')) return;
       if (isSubscribedChannel(el)) {
