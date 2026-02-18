@@ -296,7 +296,10 @@
 
     if (extensionAPI?.runtime?.sendMessage) {
       try {
-        loaded = await extensionAPI.runtime.sendMessage({ type: 'getConfig' });
+        loaded = await Promise.race([
+          extensionAPI.runtime.sendMessage({ type: 'getConfig' }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 500))
+        ]);
       } catch {}
     }
 
@@ -1059,11 +1062,14 @@
       // Collapse hidden cards instantly
       roots.map(r => `${prefix} ${r}[${HIDDEN_ATTR}]`).join(','),
       '{ display: none !important; }',
+      // Collapse outer grid wrapper when inner media element is hidden
+      `${prefix} ytd-rich-item-renderer:has(ytd-rich-grid-media[${HIDDEN_ATTR}], ytd-rich-grid-slim-media[${HIDDEN_ATTR}])`,
+      '{ display: none !important; }',
       // Prevent visible items from stretching into space left by hidden siblings
-      `${prefix} ytd-rich-item-renderer:not([${HIDDEN_ATTR}])`,
+      `${prefix} ytd-rich-item-renderer:not([${HIDDEN_ATTR}]):not(:has([${HIDDEN_ATTR}]))`,
       '{ flex-grow: 0 !important; }',
       // Collapse grid rows where all items have been filtered out
-      `${prefix} ytd-rich-grid-row:not(:has(ytd-rich-item-renderer:not([${HIDDEN_ATTR}])))`,
+      `${prefix} ytd-rich-grid-row:not(:has(ytd-rich-item-renderer:not([${HIDDEN_ATTR}]):not(:has([${HIDDEN_ATTR}]))))`,
       '{ display: none !important; }',
     ].join('\n');
     (document.head || document.documentElement).appendChild(style);
