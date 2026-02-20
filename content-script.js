@@ -12,7 +12,14 @@
     'ytd-playlist-video-renderer',
     'ytd-playlist-renderer',
     'ytd-radio-renderer',
-    'yt-lockup-view-model'
+    'yt-lockup-view-model',
+    // Mobile (m.youtube.com)
+    'ytm-rich-item-renderer',
+    'ytm-video-with-context-renderer',
+    'ytm-media-item',
+    'ytm-compact-video-renderer',
+    'ytm-reel-item-renderer',
+    'ytm-shorts-lockup-view-model'
   ].join(',');
   const CARD_ROOT_SELECTORS = [
     'ytd-rich-item-renderer',
@@ -27,7 +34,14 @@
     'ytd-reel-item-renderer',
     'yt-lockup-view-model',
     'ytd-rich-grid-media',
-    'ytd-rich-grid-slim-media'
+    'ytd-rich-grid-slim-media',
+    // Mobile (m.youtube.com)
+    'ytm-rich-item-renderer',
+    'ytm-video-with-context-renderer',
+    'ytm-media-item',
+    'ytm-compact-video-renderer',
+    'ytm-reel-item-renderer',
+    'ytm-shorts-lockup-view-model'
   ].join(',');
   const TITLE_SELECTORS = [
     '#video-title',
@@ -36,14 +50,22 @@
     'yt-formatted-string#video-title',
     'a.yt-lockup-view-model-wiz__title',
     'h3 a[href*="/watch"]',
-    'a[href*="list="]'
+    'a[href*="list="]',
+    // Mobile (m.youtube.com)
+    '.media-item-headline',
+    '.compact-media-item-headline',
+    'h3.media-item-headline',
+    'h4.media-item-headline',
+    '.media-item-headline span'
   ].join(',');
   const VIDEO_LINK_SELECTORS = [
     'a#video-title-link[href]',
     'a#video-title[href]',
     'a.yt-lockup-view-model-wiz__title[href]',
     'a[href*="/watch"]',
-    'a[href*="/shorts/"]'
+    'a[href*="/shorts/"]',
+    // Mobile (m.youtube.com)
+    'a.media-item-thumbnail-container[href]'
   ].join(',');
 
   const PROCESSED_ATTR = 'data-lang-filter-checked';
@@ -294,7 +316,12 @@
   const loadConfig = async () => {
     let loaded = null;
 
-    if (extensionAPI?.runtime?.sendMessage) {
+    // Check for proxy-injected config (mobile/non-extension environments)
+    if (typeof window !== 'undefined' && window.__ytLangFilterConfig) {
+      loaded = window.__ytLangFilterConfig;
+    }
+
+    if (!loaded && extensionAPI?.runtime?.sendMessage) {
       try {
         loaded = await Promise.race([
           extensionAPI.runtime.sendMessage({ type: 'getConfig' }),
@@ -363,7 +390,7 @@
 
   const setCardHidden = (card, hidden) => {
     const richItemWrapper = card instanceof Element
-      ? card.closest('ytd-rich-item-renderer')
+      ? (card.closest('ytd-rich-item-renderer') || card.closest('ytm-rich-item-renderer'))
       : null;
 
     if (hidden) {
@@ -1008,7 +1035,12 @@
     'yt-lockup-view-model a[href^="/@"]',
     'yt-lockup-view-model a[href^="/channel/"]',
     'yt-lockup-view-model a[href^="/c/"]',
-    'yt-lockup-view-model a[href^="/user/"]'
+    'yt-lockup-view-model a[href^="/user/"]',
+    // Mobile (m.youtube.com)
+    'ytm-video-with-context-renderer a[href^="/@"]',
+    'ytm-video-with-context-renderer a[href^="/channel/"]',
+    '.media-item-byline a[href]',
+    'ytm-badge-and-byline-renderer a[href]'
   ].join(',');
   const isSubscribedChannel = (videoElement) => {
     const channels = getSubscribedChannels();
@@ -1070,6 +1102,8 @@
       '{ display: none !important; }',
       // Prevent visible items from stretching into space left by hidden siblings
       `${prefix} ytd-rich-item-renderer:not([${HIDDEN_ATTR}])`,
+      '{ flex-grow: 0 !important; }',
+      `${prefix} ytm-rich-item-renderer:not([${HIDDEN_ATTR}])`,
       '{ flex-grow: 0 !important; }',
       // Collapse grid rows where all items have been filtered out
       `${prefix} ytd-rich-grid-row:not(:has(ytd-rich-item-renderer:not([${HIDDEN_ATTR}])))`,
