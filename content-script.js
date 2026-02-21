@@ -13,6 +13,8 @@
     'ytd-playlist-renderer',
     'ytd-radio-renderer',
     'yt-lockup-view-model',
+    // Player endscreen (watch-next overlay after video ends)
+    '.ytp-ce-element',
     // Mobile (m.youtube.com)
     'ytm-rich-item-renderer',
     'ytm-video-with-context-renderer',
@@ -35,6 +37,8 @@
     'yt-lockup-view-model',
     'ytd-rich-grid-media',
     'ytd-rich-grid-slim-media',
+    // Player endscreen (watch-next overlay after video ends)
+    '.ytp-ce-element',
     // Mobile (m.youtube.com)
     'ytm-rich-item-renderer',
     'ytm-video-with-context-renderer',
@@ -51,6 +55,8 @@
     'a.yt-lockup-view-model-wiz__title',
     'h3 a[href*="/watch"]',
     'a[href*="list="]',
+    // Player endscreen
+    '.ytp-ce-video-title',
     // Mobile (m.youtube.com)
     '.media-item-headline',
     '.compact-media-item-headline',
