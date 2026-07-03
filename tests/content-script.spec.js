@@ -483,6 +483,32 @@ test.describe('original title restoration', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Player videowall (end-of-video recommendations)
+// ---------------------------------------------------------------------------
+
+test.describe('player videowall', () => {
+  test('filters videowall tiles and re-evaluates them when reused', async ({ page }) => {
+    const html = videoEl('v1', 'Los mejores momentos del partido de esta temporada') +
+      '<div class="html5-endscreen">' +
+      '<a class="ytp-videowall-still" data-test-id="wall1" href="/watch?v=wallvid12345">' +
+      '<span class="ytp-videowall-still-info-title">The most amazing things you will ever see</span>' +
+      '</a></div>';
+    await setup(page, { selectedLanguage: 'es', showUnknown: false }, [], { html });
+    await expect(el(page, 'wall1')).toHaveAttribute(ATTR, 'en');
+    await expect(el(page, 'wall1')).toBeHidden();
+
+    // The player reuses the same tile for the next video's endscreen:
+    // content is swapped in place, so it must be re-evaluated.
+    await page.evaluate(() => {
+      document.querySelector('[data-test-id="wall1"] .ytp-videowall-still-info-title').textContent =
+        'Los más grandes momentos del fútbol en esta temporada';
+    });
+    await expect(el(page, 'wall1')).toHaveAttribute(ATTR, 'es');
+    await expect(el(page, 'wall1')).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Filtering behavior tests
 // ---------------------------------------------------------------------------
 

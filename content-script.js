@@ -15,6 +15,8 @@
     'yt-lockup-view-model',
     // Player endscreen (watch-next overlay after video ends)
     '.ytp-ce-element',
+    // Player videowall (grid of recommendations when a video ends)
+    'a.ytp-videowall-still',
     // Mobile (m.youtube.com)
     'ytm-rich-item-renderer',
     'ytm-video-with-context-renderer',
@@ -39,6 +41,8 @@
     'ytd-rich-grid-slim-media',
     // Player endscreen (watch-next overlay after video ends)
     '.ytp-ce-element',
+    // Player videowall (grid of recommendations when a video ends)
+    'a.ytp-videowall-still',
     // Mobile (m.youtube.com)
     'ytm-rich-item-renderer',
     'ytm-video-with-context-renderer',
@@ -57,6 +61,8 @@
     'a[href*="list="]',
     // Player endscreen
     '.ytp-ce-video-title',
+    // Player videowall
+    '.ytp-videowall-still-info-title',
     // Mobile (m.youtube.com)
     '.media-item-headline',
     '.compact-media-item-headline',
@@ -874,6 +880,18 @@
     replaceDisplayedTitle(root, memo.original, memo.translated);
   };
 
+  // The player reuses videowall tiles between videos (href/title swapped
+  // in place), so a processed tile must be re-evaluated when its content
+  // changes. Our own writes only touch attributes, so this can't loop.
+  const requeueVideowallStill = (element) => {
+    const still = element.closest?.('a.ytp-videowall-still');
+    if (!still || !still.hasAttribute(PROCESSED_ATTR)) return;
+    still.removeAttribute(PROCESSED_ATTR);
+    still.removeAttribute(RETRY_ATTR);
+    pendingElements.add(still);
+    scheduleProcessing(40);
+  };
+
   // Restore the main title on watch/shorts pages (display only; the
   // filter never hides the video being watched).
   const restoreWatchTitle = () => {
@@ -1375,7 +1393,10 @@
       for (const mutation of mutations) {
         if (mutation.type === 'characterData') {
           const parent = mutation.target.parentElement;
-          if (parent) reassertOriginalTitle(parent);
+          if (parent) {
+            reassertOriginalTitle(parent);
+            requeueVideowallStill(parent);
+          }
           continue;
         }
         if (mutation.type !== 'childList' || mutation.addedNodes.length === 0) continue;
@@ -1383,8 +1404,10 @@
           if (node instanceof Element) {
             queueAndProcess(node);
             reassertOriginalTitle(node);
+            requeueVideowallStill(node);
           } else if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
             reassertOriginalTitle(node.parentElement);
+            requeueVideowallStill(node.parentElement);
           }
         }
       }
