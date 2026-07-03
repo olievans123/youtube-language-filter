@@ -210,7 +210,8 @@
       'or','if','so','my','to','of','in','it','on','at','by',
       'an','we','do','no','its','out','did','had','any','now',
       'be','he','she','one','new','get','got','up','never','always',
-      'first','best','make','made','back','still','ever','off','down'
+      'first','best','make','made','back','still','ever','off','down',
+      'car','plus'
     ]),
     es: new Set([
       'el','la','los','las','un','una','de','del','al','con','por',
@@ -313,7 +314,6 @@
     'pourquoi',
     'merci',
     'saison',
-    'debut',
     'aventure',
     'itineraire',
     'gourmand',

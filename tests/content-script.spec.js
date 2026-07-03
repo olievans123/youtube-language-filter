@@ -334,6 +334,29 @@ test.describe('language detection', () => {
     await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'fr');
   });
 
+  test('does not classify English titles with debut/on as French', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr', showUnknown: true }, [
+      { id: 'v1', title: 'Her Debut Album on Vinyl' }
+    ]);
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'en');
+  });
+
+  test('does not classify English titles with plus/on as French', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr', showUnknown: false }, [
+      { id: 'v1', title: 'iPhone 17 Plus Review on Battery Life' }
+    ]);
+    await expect(el(page, 'v1')).toBeHidden();
+  });
+
+  test('does not classify English car videos as French', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr', showUnknown: true }, [
+      { id: 'v1', title: 'Living With a Classic Car on Track Days' }
+    ]);
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'en');
+  });
+
   test('detects French from sorti keyword with function word', async ({ page }) => {
     await setup(page, { selectedLanguage: 'fr' }, [
       { id: 'v1', title: 'Call of Duty a sorti un BANGER' }
