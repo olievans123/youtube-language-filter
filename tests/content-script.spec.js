@@ -457,6 +457,20 @@ test.describe('original title restoration', () => {
     await expect(el(page, 'v1').locator('#video-title')).toHaveText('Les meilleurs moments de la semaine');
   });
 
+  test('restores titles YouTube truncated with metadata-polluted aria-labels', async ({ page }) => {
+    const shown = 'Starting from Zero Hardcore Survival but I Only Follow Viewer Suggestions How Many Days...';
+    const cardHtml =
+      '<ytd-rich-item-renderer data-test-id="v1"><h3>' +
+      `<a id="video-title" href="/watch?v=abcdef12345" aria-label="${shown} 14 minutes, 56 seconds">${shown}</a>` +
+      '</h3></ytd-rich-item-renderer>';
+    await setup(page, { selectedLanguage: 'zh', showUnknown: true }, [], {
+      html: cardHtml,
+      oembedTitles: { abcdef12345: '從零開始的極限生存 我能活幾天' }
+    });
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'zh');
+    await expect(el(page, 'v1').locator('#video-title')).toHaveText('從零開始的極限生存 我能活幾天');
+  });
+
   test('re-asserts the original title after YouTube re-renders the translated one', async ({ page }) => {
     await setup(page, { selectedLanguage: 'fr', showUnknown: false }, [
       { id: 'abcdef12345', title: 'The Best Moments of the Week' }

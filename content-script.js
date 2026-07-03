@@ -780,21 +780,38 @@
     return pending;
   };
 
+  // YouTube truncates displayed titles ("…How Many Days Can I...") and
+  // appends duration metadata to aria-labels, so the remembered translated
+  // title rarely equals a node's text exactly. Compare truncation-tolerantly:
+  // equal after trimming trailing ellipses, or one is a prefix of the other.
+  const titleTextMatches = (nodeText, translatedTitle) => {
+    const normalize = (value) =>
+      collapseWhitespace(value).replace(/[.…]+$/, '').toLowerCase();
+    const a = normalize(nodeText);
+    const b = normalize(translatedTitle);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (a.length >= 10 && b.startsWith(a)) return true;
+    if (b.length >= 10 && a.startsWith(b)) return true;
+    return false;
+  };
+
   const replaceDisplayedTitle = (videoElement, originalTitle, translatedTitle) => {
     for (const node of videoElement.querySelectorAll(TITLE_SELECTORS)) {
       // Never rewrite nodes that contain more than the title text (e.g.
       // playlist anchors wrapping the whole thumbnail) — setting textContent
       // there destroys the card's markup.
       if (node.querySelector('img, yt-image, ytd-thumbnail, yt-thumbnail-view-model')) continue;
-      if (collapseWhitespace(node.textContent) !== translatedTitle) continue;
+      if (!titleTextMatches(node.textContent, translatedTitle)) continue;
 
-      // Descend to the deepest element holding exactly the title, so
-      // wrapper anchors keep their child structure intact.
+      // Descend to the deepest element holding the same text, so wrapper
+      // anchors keep their child structure intact.
       let host = node;
       while (host.firstElementChild) {
         let next = null;
+        const hostText = collapseWhitespace(host.textContent);
         for (const child of host.children) {
-          if (collapseWhitespace(child.textContent) === translatedTitle) { next = child; break; }
+          if (collapseWhitespace(child.textContent) === hostText) { next = child; break; }
         }
         if (!next) break;
         host = next;
