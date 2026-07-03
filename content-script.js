@@ -895,9 +895,13 @@
       const titleNode = document.querySelector(
         'ytd-watch-metadata h1 yt-formatted-string, h1.title yt-formatted-string'
       );
-      if (titleNode && collapseWhitespace(titleNode.textContent) !== originalTitle) {
+      if (!titleNode) return;
+      if (collapseWhitespace(titleNode.textContent) !== originalTitle) {
         titleNode.textContent = originalTitle;
       }
+      // yt-formatted-string hides itself (display:none) while flagged
+      // is-empty; writing textContent directly doesn't clear the flag.
+      titleNode.removeAttribute('is-empty');
     });
   };
 
