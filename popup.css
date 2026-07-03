@@ -11,7 +11,15 @@ body {
   background: #0f0f0f;
   color: #e8e8e8;
   min-width: 280px;
-  padding: 16px;
+  padding: 12px 14px;
+}
+
+/* No visible scrollbar in the popup */
+body::-webkit-scrollbar,
+html::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .popup {
@@ -23,8 +31,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -51,8 +59,8 @@ h1 {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
 }
 
 .card-title {

@@ -4,7 +4,8 @@
     selectedLanguage: 'en',
     selectedLanguages: ['en'],
     showUnknown: true,
-    keepSubscribed: true
+    keepSubscribed: true,
+    restoreOriginalTitles: true
   };
 
   const SUPPORTED_LANGUAGE_CODES = new Set(['en', 'es', 'fr', 'zh']);
@@ -30,9 +31,11 @@
     languageOptions: document.getElementById('languageOptions'),
     showUnknown: document.getElementById('showUnknown'),
     keepSubscribed: document.getElementById('keepSubscribed'),
+    restoreOriginalTitles: document.getElementById('restoreOriginalTitles'),
     status: document.getElementById('status'),
     langCard: document.getElementById('langCard'),
     unknownCard: document.getElementById('unknownCard'),
+    originalTitlesCard: document.getElementById('originalTitlesCard'),
     subscribedCard: document.getElementById('subscribedCard')
   };
 
@@ -40,6 +43,7 @@
     const disabled = !elements.enabled.checked;
     elements.langCard.classList.toggle('disabled', disabled);
     elements.unknownCard.classList.toggle('disabled', disabled);
+    elements.originalTitlesCard.classList.toggle('disabled', disabled);
     elements.subscribedCard.classList.toggle('disabled', disabled);
   };
 
@@ -74,7 +78,8 @@
       selectedLanguage: selectedLanguages[0],
       selectedLanguages,
       showUnknown: Boolean(merged.showUnknown),
-      keepSubscribed: Boolean(merged.keepSubscribed)
+      keepSubscribed: Boolean(merged.keepSubscribed),
+      restoreOriginalTitles: Boolean(merged.restoreOriginalTitles)
     };
   };
 
@@ -145,7 +150,8 @@
       selectedLanguage: selectedLanguages[0],
       selectedLanguages,
       showUnknown: elements.showUnknown.checked,
-      keepSubscribed: elements.keepSubscribed.checked
+      keepSubscribed: elements.keepSubscribed.checked,
+      restoreOriginalTitles: elements.restoreOriginalTitles.checked
     };
   };
 
@@ -156,6 +162,7 @@
     }
     elements.showUnknown.checked = values.showUnknown;
     elements.keepSubscribed.checked = values.keepSubscribed;
+    elements.restoreOriginalTitles.checked = values.restoreOriginalTitles;
   };
 
   const sendRuntimeMessage = (message) => {
@@ -250,6 +257,7 @@
   }
   elements.showUnknown.addEventListener('change', save);
   elements.keepSubscribed.addEventListener('change', save);
+  elements.restoreOriginalTitles.addEventListener('change', save);
 
 
   storageGet().then((values) => {

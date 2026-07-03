@@ -20,7 +20,8 @@ async function setup(page, cfg, videos, {
   waitForAttr = true,
   html = null,
   url = '/',
-  feedHtml = null
+  feedHtml = null,
+  oembedTitles = null
 } = {}) {
   const defaults = { enabled: true, selectedLanguage: 'en', showUnknown: true };
   const merged = { ...defaults, ...cfg };
@@ -31,7 +32,7 @@ async function setup(page, cfg, videos, {
   );
 
   // Mock browser.runtime messaging (mirrors background.js behaviour)
-  await page.evaluate(({ c, pathUrl, mockFeedHtml }) => {
+  await page.evaluate(({ c, pathUrl, mockFeedHtml, mockOembedTitles }) => {
     const mockAPI = {
       runtime: {
         sendMessage: (msg) => {
@@ -52,22 +53,33 @@ async function setup(page, cfg, videos, {
       } catch {}
     }
 
-    if (typeof mockFeedHtml === 'string') {
+    if (typeof mockFeedHtml === 'string' || mockOembedTitles) {
       window.fetch = (input) => {
         const target = typeof input === 'string' ? input : (input && input.url) || '';
-        if (target.includes('/feed/channels')) {
+        if (typeof mockFeedHtml === 'string' && target.includes('/feed/channels')) {
           return Promise.resolve({
             ok: true,
             text: () => Promise.resolve(mockFeedHtml)
           });
         }
+        if (mockOembedTitles && target.includes('/oembed')) {
+          const idMatch = decodeURIComponent(target).match(/[?&]v=([\w-]+)/);
+          const title = idMatch ? mockOembedTitles[idMatch[1]] : undefined;
+          if (typeof title === 'string') {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve({ title })
+            });
+          }
+        }
         return Promise.resolve({
           ok: false,
-          text: () => Promise.resolve('')
+          text: () => Promise.resolve(''),
+          json: () => Promise.reject(new Error('not found'))
         });
       };
     }
-  }, { c: merged, pathUrl: url, mockFeedHtml: feedHtml });
+  }, { c: merged, pathUrl: url, mockFeedHtml: feedHtml, mockOembedTitles: oembedTitles });
 
   await page.addScriptTag({ path: SCRIPT });
 
@@ -328,6 +340,145 @@ test.describe('language detection', () => {
     ]);
     await expect(el(page, 'v1')).toBeVisible();
     await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'fr');
+  });
+
+  test('detects Spanish from inverted punctuation', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'es' }, [
+      { id: 'v1', title: '¿Sabías esto? Increíble reacción' }
+    ]);
+    await expect(el(page, 'v1')).toBeVisible();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'es');
+  });
+
+  test('detects French from apostrophe elisions', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr' }, [
+      { id: 'v1', title: "J'ai testé l'arme la plus chère du jeu" }
+    ]);
+    await expect(el(page, 'v1')).toBeVisible();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'fr');
+  });
+
+  test('does not treat English possessives as French elisions', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr', showUnknown: true }, [
+      { id: 'v1', title: "Gordon's Best Moments in the Kitchen" }
+    ]);
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'en');
+  });
+
+  test('detects English from contraction plus function words', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'en' }, [
+      { id: 'v1', title: "You Won't Believe What Happened Next" }
+    ]);
+    await expect(el(page, 'v1')).toBeVisible();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'en');
+  });
+
+  test('detects French from distinct accent plus function words', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr' }, [
+      { id: 'v1', title: 'La forêt la plus dangereuse du Canada' }
+    ]);
+    await expect(el(page, 'v1')).toBeVisible();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'fr');
+  });
+
+  test('detects Spanish from distinct accent plus function words', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'es' }, [
+      { id: 'v1', title: 'La canción del verano según los expertos' }
+    ]);
+    await expect(el(page, 'v1')).toBeVisible();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'es');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Original title restoration tests
+// ---------------------------------------------------------------------------
+
+test.describe('original title restoration', () => {
+  test('re-classifies a card when oEmbed reveals a translated title', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr', showUnknown: false }, [
+      { id: 'abcdef12345', title: 'The Best Moments of the Week' }
+    ], {
+      oembedTitles: { abcdef12345: 'Les meilleurs moments de la semaine' }
+    });
+    await expect(el(page, 'abcdef12345')).toHaveAttribute(ATTR, 'fr');
+    await expect(el(page, 'abcdef12345')).toBeVisible();
+    await expect(el(page, 'abcdef12345').locator('#video-title')).toHaveText('Les meilleurs moments de la semaine');
+  });
+
+  test('keeps classification when oEmbed returns the same title', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'en' }, [
+      { id: 'abcdef12345', title: 'The Best Moments of the Week' }
+    ], {
+      oembedTitles: { abcdef12345: 'The Best Moments of the Week' }
+    });
+    await expect(el(page, 'abcdef12345')).toHaveAttribute(ATTR, 'en');
+    await expect(el(page, 'abcdef12345')).toBeVisible();
+  });
+
+  test('does not touch titles when the feature is disabled', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'en', restoreOriginalTitles: false }, [
+      { id: 'abcdef12345', title: 'The Best Moments of the Week' }
+    ], {
+      oembedTitles: { abcdef12345: 'Les meilleurs moments de la semaine' }
+    });
+    await expect(el(page, 'abcdef12345')).toHaveAttribute(ATTR, 'en');
+    await expect(el(page, 'abcdef12345').locator('#video-title')).toHaveText('The Best Moments of the Week');
+  });
+
+  test('leaves playlist cards untouched (no thumbnail-destroying rewrite)', async ({ page }) => {
+    const playlistHtml =
+      '<ytd-rich-item-renderer data-test-id="pl1">' +
+      '<yt-lockup-view-model>' +
+      '<a href="/watch?v=abcdef12345&list=PL123"><yt-collection-thumbnail-view-model><img src="thumb.jpg"></yt-collection-thumbnail-view-model></a>' +
+      '<h3><a class="yt-lockup-view-model-wiz__title" href="/watch?v=abcdef12345&list=PL123">Birthday Party Videos 2024</a></h3>' +
+      '</yt-lockup-view-model>' +
+      '</ytd-rich-item-renderer>';
+    await setup(page, { selectedLanguage: 'en', showUnknown: true }, [], {
+      html: playlistHtml,
+      oembedTitles: { abcdef12345: 'Fiesta de cumpleaños en la playa' }
+    });
+    await page.waitForTimeout(400);
+    await expect(el(page, 'pl1').locator('img')).toHaveCount(1);
+    await expect(el(page, 'pl1').locator('.yt-lockup-view-model-wiz__title')).toHaveText('Birthday Party Videos 2024');
+  });
+
+  test('restores video cards that carry playlist context in their links', async ({ page }) => {
+    const cardHtml =
+      '<ytd-rich-item-renderer data-test-id="v1">' +
+      '<a href="/watch?v=abcdef12345&list=PL999"><span id="video-title">The Best Moments of the Week</span></a>' +
+      '</ytd-rich-item-renderer>';
+    await setup(page, { selectedLanguage: 'fr', showUnknown: false }, [], {
+      html: cardHtml,
+      oembedTitles: { abcdef12345: 'Les meilleurs moments de la semaine' }
+    });
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'fr');
+    await expect(el(page, 'v1').locator('#video-title')).toHaveText('Les meilleurs moments de la semaine');
+  });
+
+  test('re-asserts the original title after YouTube re-renders the translated one', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr', showUnknown: false }, [
+      { id: 'abcdef12345', title: 'The Best Moments of the Week' }
+    ], {
+      oembedTitles: { abcdef12345: 'Les meilleurs moments de la semaine' }
+    });
+    await expect(el(page, 'abcdef12345').locator('#video-title')).toHaveText('Les meilleurs moments de la semaine');
+    // Simulate YouTube hydration stamping the translated title back
+    await page.evaluate(() => {
+      document.querySelector('[data-test-id="abcdef12345"] #video-title').textContent = 'The Best Moments of the Week';
+    });
+    await expect(el(page, 'abcdef12345').locator('#video-title')).toHaveText('Les meilleurs moments de la semaine');
+  });
+
+  test('does not fetch originals for titles already in a non-UI language', async ({ page }) => {
+    await setup(page, { selectedLanguage: 'fr' }, [
+      { id: 'abcdef12345', title: 'Les plus beaux endroits dans le monde avec nous' }
+    ], {
+      oembedTitles: { abcdef12345: 'SHOULD NEVER BE USED' }
+    });
+    await expect(el(page, 'abcdef12345')).toHaveAttribute(ATTR, 'fr');
+    await expect(el(page, 'abcdef12345').locator('#video-title')).toHaveText('Les plus beaux endroits dans le monde avec nous');
   });
 });
 

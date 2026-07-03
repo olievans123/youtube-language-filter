@@ -87,7 +87,8 @@
     selectedLanguage: 'en',
     selectedLanguages: ['en'],
     showUnknown: true,
-    keepSubscribed: true
+    keepSubscribed: true,
+    restoreOriginalTitles: true
   };
 
   const SUPPORTED_LANGUAGE_CODES = new Set(['en', 'es', 'fr', 'zh']);
@@ -145,7 +146,8 @@
       selectedLanguage: selectedLanguages[0],
       selectedLanguages,
       showUnknown: Boolean(merged.showUnknown),
-      keepSubscribed: Boolean(merged.keepSubscribed)
+      keepSubscribed: Boolean(merged.keepSubscribed),
+      restoreOriginalTitles: Boolean(merged.restoreOriginalTitles)
     };
   };
 
@@ -200,7 +202,9 @@
       'between','both','during','might','another','being','over',
       'again','then','once','such','same','just','like',
       'or','if','so','my','to','of','in','it','on','at','by',
-      'an','we','do','no','its','out','did','had','any','now'
+      'an','we','do','no','its','out','did','had','any','now',
+      'be','he','she','one','new','get','got','up','never','always',
+      'first','best','make','made','back','still','ever','off','down'
     ]),
     es: new Set([
       'el','la','los','las','un','una','de','del','al','con','por',
@@ -208,10 +212,12 @@
       'esta','estos','estas','ese','esa','muy','cuando','donde',
       'porque','entre','desde','hasta','sobre','todo','cada',
       'otro','otra','sin','siempre','nunca','puede','tiene',
-      'hay','tambien','despues','antes','nos','les','su','sus',
+      'hay','tambien','despues','antes','nos','su','sus',
       'mi','mis','tu','tus','yo','ella','ellos','nosotros',
       'ya','aqui','asi','solo','mucho','poco','mejor','peor',
-      'nuevo','nueva','bueno','buena','grande','se','lo','le'
+      'nuevo','nueva','bueno','buena','grande','se','lo','le',
+      'fue','ser','esto','eso','ahora','hace','hacer','vamos',
+      'quien','mientras','aunque','uno','dos','vez','anos','contra','tras'
     ]),
     fr: new Set([
       'le','la','les','un','une','de','des','du','au','aux',
@@ -222,7 +228,10 @@
       'apres','avant','toujours','jamais','je','tu','il',
       'elle','on','leur','leurs','notre','votre','ce','cet',
       'ici','donc','alors','ni','car','puis',
-      'encore','rien','peu','beaucoup','trop','assez','ne'
+      'encore','rien','peu','beaucoup','trop','assez','ne',
+      'qu','sans','sous','chez','cela','ca','fait','faire','etre',
+      'avoir','peut','etait','moi','toi','lui','tous','toute','toutes',
+      'quel','quelle','deux','entre','contre','pendant','chaque','ans','ete','voici'
     ])
   };
 
@@ -635,6 +644,28 @@
       return 'fr';
     }
 
+    // Inverted punctuation is unambiguously Spanish.
+    if (/[¿¡]/.test(title)) return 'es';
+
+    // Apostrophe elisions (l'ami, j'ai, c'est, qu'il) are a strong French
+    // signal the tokenizer otherwise discards; require corroboration to
+    // avoid Italian elisions and English names like Coeur d'Alene.
+    const frenchElisions = (title.match(/(?<!\p{L})(?:qu|[jlcdnst])['’](?=\p{L})/giu) || []).length;
+    if (frenchElisions >= 2 && (frenchFunctionMatches >= 1 || hasFrenchAccent)) return 'fr';
+    if (frenchElisions >= 1 && frenchFunctionMatches >= 2) return 'fr';
+
+    // English contractions (don't, it's, you're) with function-word backup.
+    const englishFunctionMatches = words.filter((word) => WORD_LISTS.en.has(word)).length;
+    const englishContractions = (title.match(/\p{L}+(?:n['’]t|['’](?:s|re|ve|ll|d))(?!\p{L})/giu) || []).length;
+    if (englishContractions >= 1 && englishFunctionMatches >= 2) return 'en';
+
+    // Accents that exist in only one of the two languages (é is shared, so
+    // excluded) let one function word confirm what the accent suggests.
+    const hasSpanishDistinctChar = /[áíóúñ]/i.test(title);
+    const hasFrenchDistinctChar = /[àèùâêîôûëïçœæ]/i.test(title);
+    if (hasSpanishDistinctChar && !hasFrenchDistinctChar && spanishFunctionMatches >= 2) return 'es';
+    if (hasFrenchDistinctChar && !hasSpanishDistinctChar && frenchFunctionMatches >= 2) return 'fr';
+
     if (words.length < 3) return null;
 
     let bestLang = null;
@@ -677,6 +708,197 @@
     }
 
     return language;
+  };
+
+  // --- Original (untranslated) title restoration via oEmbed ---
+  //
+  // YouTube auto-translates titles into the UI language, which breaks
+  // detection (a French video shown with an English title reads as 'en').
+  // The oEmbed endpoint returns the canonical untranslated title without
+  // needing an API key or cookies. Only titles that could plausibly be
+  // translations (detected as the UI language, or undetected Latin-script)
+  // are looked up, capped at a few concurrent same-origin requests.
+
+  const uiLanguage = ((document.documentElement?.lang || navigator.language || 'en').split('-')[0] || 'en').toLowerCase();
+  const originalTitleCache = new Map();
+  const pendingTitleFetches = new Map();
+  const oembedQueue = [];
+  const OEMBED_CONCURRENCY = 4;
+  let activeOembedCount = 0;
+
+  const runOembedQueue = () => {
+    while (activeOembedCount < OEMBED_CONCURRENCY && oembedQueue.length > 0) {
+      const job = oembedQueue.shift();
+      activeOembedCount++;
+      job().finally(() => {
+        activeOembedCount--;
+        runOembedQueue();
+      });
+    }
+  };
+
+  const getVideoId = (videoElement) => {
+    for (const link of videoElement.querySelectorAll(VIDEO_LINK_SELECTORS)) {
+      const href = link.getAttribute('href') || '';
+      const watch = href.match(/[?&]v=([\w-]{6,})/);
+      if (watch) return watch[1];
+      const shorts = href.match(/\/shorts\/([\w-]{6,})/);
+      if (shorts) return shorts[1];
+    }
+    return null;
+  };
+
+  const fetchOriginalTitle = (videoId) => {
+    if (originalTitleCache.has(videoId)) return Promise.resolve(originalTitleCache.get(videoId));
+
+    let pending = pendingTitleFetches.get(videoId);
+    if (pending) return pending;
+
+    pending = new Promise((resolve) => {
+      oembedQueue.push(() =>
+        Promise.resolve()
+          .then(() => fetch(`/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`, {
+            credentials: 'omit',
+            signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined
+          }))
+          .then((response) => (response.ok ? response.json() : null))
+          .then((data) => {
+            const title = collapseWhitespace(data?.title) || null;
+            if (originalTitleCache.size > 5000) originalTitleCache.clear();
+            originalTitleCache.set(videoId, title);
+            resolve(title);
+          })
+          .catch(() => {
+            originalTitleCache.set(videoId, null);
+            resolve(null);
+          })
+      );
+      runOembedQueue();
+    }).finally(() => pendingTitleFetches.delete(videoId));
+
+    pendingTitleFetches.set(videoId, pending);
+    return pending;
+  };
+
+  const replaceDisplayedTitle = (videoElement, originalTitle, translatedTitle) => {
+    for (const node of videoElement.querySelectorAll(TITLE_SELECTORS)) {
+      // Never rewrite nodes that contain more than the title text (e.g.
+      // playlist anchors wrapping the whole thumbnail) — setting textContent
+      // there destroys the card's markup.
+      if (node.querySelector('img, yt-image, ytd-thumbnail, yt-thumbnail-view-model')) continue;
+      if (collapseWhitespace(node.textContent) !== translatedTitle) continue;
+
+      // Descend to the deepest element holding exactly the title, so
+      // wrapper anchors keep their child structure intact.
+      let host = node;
+      while (host.firstElementChild) {
+        let next = null;
+        for (const child of host.children) {
+          if (collapseWhitespace(child.textContent) === translatedTitle) { next = child; break; }
+        }
+        if (!next) break;
+        host = next;
+      }
+      if (!host.firstElementChild) host.textContent = originalTitle;
+
+      if (node.getAttribute?.('title')) node.setAttribute('title', originalTitle);
+      if (node.getAttribute?.('aria-label')) node.setAttribute('aria-label', originalTitle);
+    }
+  };
+
+  const PLAYLIST_CARD_SELECTORS = [
+    'ytd-playlist-renderer',
+    'ytd-radio-renderer',
+    'ytd-compact-radio-renderer',
+    'ytd-rich-grid-radio-renderer'
+  ].join(',');
+
+  const isPlaylistCard = (videoElement) => {
+    if (videoElement.matches?.(PLAYLIST_CARD_SELECTORS)) return true;
+    if (videoElement.querySelector?.(PLAYLIST_CARD_SELECTORS)) return true;
+    // Collection-stack thumbnails mark playlist/mix entity cards in the
+    // lockup layout: their title is a playlist name, not a video title.
+    // (Video cards that merely carry list= context are fine to restore.)
+    if (videoElement.querySelector?.('yt-collection-thumbnail-view-model, ytd-playlist-thumbnail, [class*="ollectionThumbnail"]')) return true;
+    for (const link of videoElement.querySelectorAll(TITLE_SELECTORS)) {
+      const href = link.getAttribute?.('href') || '';
+      if (href.startsWith('/playlist')) return true;
+      // Mixes/radio (auto-generated): list ids start with RD
+      if (/[?&]list=RD/.test(href)) return true;
+    }
+    return false;
+  };
+
+  const maybeRefineWithOriginalTitle = (videoElement, domTitle, domLanguage) => {
+    if (!config.enabled || !config.restoreOriginalTitles) return;
+    // A title already detected as a non-UI language cannot be a translation.
+    if (domLanguage !== null && domLanguage !== uiLanguage) return;
+    // Undetected CJK/kana/hangul titles are not translations into a Latin UI.
+    if (domLanguage === null && (CJK_RE.test(domTitle) || JA_RE.test(domTitle) || KO_RE.test(domTitle))) return;
+    // Playlist/mix cards show a playlist name, not the first video's title.
+    if (isPlaylistCard(videoElement)) return;
+
+    const videoId = getVideoId(videoElement);
+    if (!videoId) return;
+
+    fetchOriginalTitle(videoId).then((originalTitle) => {
+      if (!originalTitle || originalTitle === domTitle) return;
+      if (!videoElement.isConnected || !config.enabled) return;
+
+      replaceDisplayedTitle(videoElement, originalTitle, domTitle);
+      // YouTube's hydration can re-render the translated title over our
+      // replacement; remember the swap so the observer can re-assert it.
+      videoElement.__ytlfOriginalTitle = { original: originalTitle, translated: domTitle };
+
+      const language = getCachedLanguage(originalTitle);
+      if (language === domLanguage) return;
+
+      if (config.keepSubscribed && isSubscribedChannel(videoElement)) {
+        videoElement.setAttribute(PROCESSED_ATTR, language || 'unknown');
+        return;
+      }
+
+      const selectedLanguages = new Set(
+        normalizeLanguageArray(config.selectedLanguages ?? config.selectedLanguage)
+      );
+      applyLanguageDecision(videoElement, language, selectedLanguages);
+    });
+  };
+
+  // Re-apply a remembered original title after YouTube hydration re-renders
+  // the translated one over our replacement.
+  const reassertOriginalTitle = (node) => {
+    const root = node.closest?.(CARD_ROOT_SELECTORS);
+    const memo = root?.__ytlfOriginalTitle;
+    if (!memo) return;
+    replaceDisplayedTitle(root, memo.original, memo.translated);
+  };
+
+  // Restore the main title on watch/shorts pages (display only; the
+  // filter never hides the video being watched).
+  const restoreWatchTitle = () => {
+    if (!config.enabled || !config.restoreOriginalTitles) return;
+
+    let videoId = null;
+    const pathname = location.pathname || '';
+    if (pathname.startsWith('/shorts/')) {
+      videoId = (pathname.match(/^\/shorts\/([\w-]{6,})/) || [])[1] || null;
+    } else if (pathname === '/watch') {
+      try {
+        videoId = new URLSearchParams(location.search).get('v');
+      } catch {}
+    }
+    if (!videoId) return;
+
+    fetchOriginalTitle(videoId).then((originalTitle) => {
+      if (!originalTitle) return;
+      const titleNode = document.querySelector(
+        'ytd-watch-metadata h1 yt-formatted-string, h1.title yt-formatted-string'
+      );
+      if (titleNode && collapseWhitespace(titleNode.textContent) !== originalTitle) {
+        titleNode.textContent = originalTitle;
+      }
+    });
   };
 
   const getSearchQueryLanguageHints = () => {
@@ -809,10 +1031,12 @@
         el.setAttribute(PROCESSED_ATTR, language || 'unknown');
         el.removeAttribute(RETRY_ATTR);
         setCardHidden(el, false);
+        maybeRefineWithOriginalTitle(el, title, language);
         continue;
       }
 
       applyLanguageDecision(el, language, selectedLanguages);
+      maybeRefineWithOriginalTitle(el, title, language);
     }
 
     if (hasPendingElements) {
@@ -888,6 +1112,7 @@
 
       lastRouteKey = nextRouteKey;
       lastPathname = nextPathname;
+      restoreWatchTitle();
 
       // Search results mutate heavily while preserving URL-ish state.
       // Avoid full resets there; process incrementally.
@@ -1139,19 +1364,29 @@
       lastPathname = location.pathname || '';
       setFilterActive(config.enabled);
       queueAndProcess(document, 0);
+      restoreWatchTitle();
     });
 
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
+        if (mutation.type === 'characterData') {
+          const parent = mutation.target.parentElement;
+          if (parent) reassertOriginalTitle(parent);
+          continue;
+        }
         if (mutation.type !== 'childList' || mutation.addedNodes.length === 0) continue;
         for (const node of mutation.addedNodes) {
-          if (!(node instanceof Element)) continue;
-          queueAndProcess(node);
+          if (node instanceof Element) {
+            queueAndProcess(node);
+            reassertOriginalTitle(node);
+          } else if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
+            reassertOriginalTitle(node.parentElement);
+          }
         }
       }
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
     window.addEventListener('yt-navigate-finish', () => {
       scheduleNavigationReEvaluate();
@@ -1162,7 +1397,11 @@
     // Search pages emit this event frequently while results stream in.
     // Incremental queueing avoids full reset loops that keep cards in
     // batching/hidden state indefinitely.
-    window.addEventListener('yt-page-data-updated', () => queueAndProcess(document, 40));
+    window.addEventListener('yt-page-data-updated', () => {
+      queueAndProcess(document, 40);
+      // The watch-page title node often renders after navigation events.
+      restoreWatchTitle();
+    });
   };
 
   if (document.readyState === 'loading') {

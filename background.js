@@ -5,7 +5,8 @@ const DEFAULTS = {
   selectedLanguage: 'en',
   selectedLanguages: ['en'],
   showUnknown: true,
-  keepSubscribed: true
+  keepSubscribed: true,
+  restoreOriginalTitles: true
 };
 
 const SUPPORTED_LANGUAGE_CODES = new Set(['en', 'es', 'fr', 'zh']);
@@ -45,7 +46,8 @@ function normalizeConfig(value) {
     selectedLanguage: selectedLanguages[0],
     selectedLanguages,
     showUnknown: Boolean(merged.showUnknown),
-    keepSubscribed: Boolean(merged.keepSubscribed)
+    keepSubscribed: Boolean(merged.keepSubscribed),
+    restoreOriginalTitles: Boolean(merged.restoreOriginalTitles)
   };
 }
 
