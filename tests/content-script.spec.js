@@ -471,6 +471,25 @@ test.describe('original title restoration', () => {
     await expect(el(page, 'v1').locator('#video-title')).toHaveText('從零開始的極限生存 我能活幾天');
   });
 
+  test('untruncates same-language titles without looping', async ({ page }) => {
+    const shown = 'The Best Moments of the Week in the World of Speedrunning and More...';
+    const full = 'The Best Moments of the Week in the World of Speedrunning and More Great Games';
+    const cardHtml =
+      '<ytd-rich-item-renderer data-test-id="v1"><h3>' +
+      `<a id="video-title" href="/watch?v=abcdef12345" aria-label="${shown}">${shown}</a>` +
+      '</h3></ytd-rich-item-renderer>';
+    await setup(page, { selectedLanguage: 'en', showUnknown: true }, [], {
+      html: cardHtml,
+      oembedTitles: { abcdef12345: full }
+    });
+    await expect(el(page, 'v1').locator('#video-title')).toHaveText(full);
+    // The page must stay responsive (a rewrite loop would starve the event loop)
+    await page.waitForTimeout(600);
+    const responsive = await page.evaluate(() => new Promise(r => setTimeout(() => r(true), 50)));
+    expect(responsive).toBe(true);
+    await expect(el(page, 'v1').locator('#video-title')).toHaveText(full);
+  });
+
   test('re-asserts the original title after YouTube re-renders the translated one', async ({ page }) => {
     await setup(page, { selectedLanguage: 'fr', showUnknown: false }, [
       { id: 'abcdef12345', title: 'The Best Moments of the Week' }
