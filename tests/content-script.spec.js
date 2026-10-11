@@ -676,3 +676,31 @@ test.describe('n-gram model', () => {
     await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'fr');
   });
 });
+
+test.describe('UI-language metadata in aria-labels', () => {
+  // 2026 home-feed lockup: the title link's aria-label is the title plus the
+  // duration in the UI language, which used to win as the "longest" title.
+  const lockup = (id, title, aria) =>
+    `<ytd-rich-item-renderer data-test-id="${id}"><yt-lockup-view-model>` +
+    `<a class="ytLockupViewModelContentImage" href="/watch?v=${id}"></a>` +
+    `<h3 class="ytLockupMetadataViewModelHeadingReset" title="${title}" aria-label="${title}">` +
+    `<a class="ytLockupMetadataViewModelTitle" href="/watch?v=${id}" aria-label="${aria}">${title}</a></h3>` +
+    `<span aria-label="232 millones de visualizaciones">232 M</span>` +
+    `</yt-lockup-view-model></ytd-rich-item-renderer>`;
+
+  test('Spanish UI duration does not make an English title Spanish', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['es'], showUnknown: false }, [], {
+      html: lockup('aaaaaaaaaaa', 'Cut Worms - Evil Twin (Official Video)', 'Cut Worms - Evil Twin (Official Video) 3 minutos y 34 segundos')
+    });
+    await expect(el(page, 'aaaaaaaaaaa')).toBeHidden();
+    await expect(el(page, 'aaaaaaaaaaa')).not.toHaveAttribute(ATTR, 'es');
+  });
+
+  test('French UI duration does not make an English title French', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['fr'], showUnknown: false }, [], {
+      html: lockup('bbbbbbbbbbb', 'Cut Worms - Evil Twin (Official Video)', 'Cut Worms - Evil Twin (Official Video) 3 minutes et 34 secondes')
+    });
+    await expect(el(page, 'bbbbbbbbbbb')).toBeHidden();
+    await expect(el(page, 'bbbbbbbbbbb')).not.toHaveAttribute(ATTR, 'fr');
+  });
+});

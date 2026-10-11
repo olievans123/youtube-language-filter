@@ -568,10 +568,24 @@
 
     if (candidates.length === 0) return null;
 
+    // Screen-reader labels repeat the title and append metadata in the UI
+    // language ("Skinny Love (Official Video) 3 minutos y 34 segundos"),
+    // which reads as that language. When a candidate is another candidate
+    // plus a suffix, the shorter one is the bare title.
+    const bare = candidates.filter((candidate) => {
+      const lower = candidate.text.toLowerCase();
+      return !candidates.some((other) =>
+        other !== candidate
+        && other.text.length >= 3
+        && !/^(?:mix|playlist)$/i.test(other.text)
+        && lower.length > other.text.length
+        && lower.startsWith(`${other.text.toLowerCase()} `));
+    });
+
     let best = null;
     let bestScore = -Infinity;
 
-    for (const candidate of candidates) {
+    for (const candidate of bare) {
       const score = scoreCandidateText(candidate.text, candidate.source);
       if (score > bestScore) {
         bestScore = score;
