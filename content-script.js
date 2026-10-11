@@ -754,10 +754,12 @@
   const looksGalician = (title) =>
     tokenize(title).filter((word) => GALICIAN_MARKERS.has(word)).length >= 2;
 
-  // Any accented letter or ¿¡ rules out the English loanwords and names
-  // that fool the model; so does one of the language's function words.
+  // An accent only that language uses, or one of its function words, rules
+  // out the English loanwords and names that fool the model. é doesn't
+  // count: it's in too many names (Beyoncé, Pokémon, Mbappé).
+  const LANGUAGE_ACCENTS = { es: /[áíóúñ¿¡]/i, fr: /[àèùâêîôûëïçœæ]/i };
   const hasLanguageEvidence = (title, lang) =>
-    /[à-öø-ÿœæ¿¡]/i.test(title)
+    LANGUAGE_ACCENTS[lang]?.test(title)
     || tokenize(title).some((word) => WORD_LISTS[lang]?.has(word));
 
   const combineWithModel = (title, ruleGuess) => {
