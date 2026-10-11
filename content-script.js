@@ -732,7 +732,8 @@
     targetMargin: 0.04,    // en/es/fr winner must beat the runner-up by this much…
     overrideMargin: 0.05,  // …and by this much to overrule a different rules answer
     relativeMargin: 0.05,  // a neighbouring language (pt, ca…) needs this much to be named
-    relativeMinNgrams: 6   // …and this much text: short es/fr titles look like anything
+    relativeMinNgrams: 6,  // …and this much text: short es/fr titles look like anything
+    unbackedMinNgrams: 6   // below this, an es/fr answer the rules didn't back needs evidence
   };
   const MODEL_TARGETS = new Set(['en', 'es', 'fr']);
   // Languages easily mistaken for es/fr. Naming one hides the card (it isn't
@@ -753,6 +754,12 @@
   const looksGalician = (title) =>
     tokenize(title).filter((word) => GALICIAN_MARKERS.has(word)).length >= 2;
 
+  // Any accented letter or ¿¡ rules out the English loanwords and names
+  // that fool the model; so does one of the language's function words.
+  const hasLanguageEvidence = (title, lang) =>
+    /[à-öø-ÿœæ¿¡]/i.test(title)
+    || tokenize(title).some((word) => WORD_LISTS[lang]?.has(word));
+
   const combineWithModel = (title, ruleGuess) => {
     const guess = combineWithModelRaw(title, ruleGuess);
     return guess === 'es' && looksGalician(title) ? 'gl' : guess;
@@ -770,7 +777,13 @@
     if (top === ruleGuess) return ruleGuess;
     if (MODEL_TARGETS.has(top)) {
       const needed = ruleGuess ? MODEL_TUNING.overrideMargin : MODEL_TUNING.targetMargin;
-      return margin >= needed ? top : ruleGuess;
+      if (margin < needed) return ruleGuess;
+      // Alone on a short title, the model is swayed by loanwords and names
+      // ("Error 37 Rage, Diablo 3 Rage!" → es); ask for one word or accent
+      // that is actually of that language.
+      if (!ruleGuess && top !== 'en' && ngrams < MODEL_TUNING.unbackedMinNgrams
+        && !hasLanguageEvidence(title, top)) return null;
+      return top;
     }
     if (MODEL_RELATIVES.has(top)
       && margin >= MODEL_TUNING.relativeMargin
