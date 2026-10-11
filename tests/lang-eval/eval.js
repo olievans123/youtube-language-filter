@@ -12,7 +12,16 @@ const { loadDetector, loadProxyDetector } = require('./load-detector');
 const SUPPORTED = new Set(['en', 'es', 'fr', 'zh']);
 const args = new Set(process.argv.slice(2));
 const detect = args.has('--proxy') ? loadProxyDetector() : loadDetector();
-const data = [
+const loadSet = (name) => (fs.existsSync(path.join(__dirname, name))
+  ? JSON.parse(fs.readFileSync(path.join(__dirname, name), 'utf8')) : []);
+// --dev / --holdout pick half of the harvested real-YouTube titles each
+// (split by a hash of the title), so thresholds tuned on one half can be
+// checked on the other.
+const half = (title) => [...title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 2;
+const harvested = loadSet('titles-harvested.json').filter((o) =>
+  args.has('--dev') ? half(o.title) === 0 : args.has('--holdout') ? half(o.title) === 1 : true);
+// --orig scores only the original set (history + written titles).
+const data = args.has('--dev') || args.has('--holdout') ? harvested : [...(args.has('--orig') ? [] : harvested),
   ...JSON.parse(fs.readFileSync(path.join(__dirname, 'titles.json'), 'utf8')),
   // Titles from personal watch history: local only (gitignored), used when present.
   ...(fs.existsSync(path.join(__dirname, 'titles-history.json'))

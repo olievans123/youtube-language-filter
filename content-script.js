@@ -732,8 +732,7 @@
     targetMargin: 0.04,    // en/es/fr winner must beat the runner-up by this much…
     overrideMargin: 0.05,  // …and by this much to overrule a different rules answer
     relativeMargin: 0.05,  // a neighbouring language (pt, ca…) needs this much to be named
-    relativeMinNgrams: 6,  // …and this much text: short es/fr titles look like anything
-    unbackedMinNgrams: 6   // below this, an es/fr answer the rules didn't back needs evidence
+    relativeMinNgrams: 6   // …and this much text: short es/fr titles look like anything
   };
   const MODEL_TARGETS = new Set(['en', 'es', 'fr']);
   // Languages easily mistaken for es/fr. Naming one hides the card (it isn't
@@ -754,42 +753,163 @@
   const looksGalician = (title) =>
     tokenize(title).filter((word) => GALICIAN_MARKERS.has(word)).length >= 2;
 
-  // An accent only that language uses, or one of its function words, rules
-  // out the English loanwords and names that fool the model. é doesn't
-  // count: it's in too many names (Beyoncé, Pokémon, Mbappé).
+  // An accent only that language uses, one of its function words, or a
+  // stock YouTube phrase in it, rules out the English loanwords and names
+  // that fool the model. é doesn't count: it's in too many names (Beyoncé,
+  // Pokémon, Mbappé).
   const LANGUAGE_ACCENTS = { es: /[áíóúñ¿¡]/i, fr: /[àèùâêîôûëïçœæ]/i };
+  const FRENCH_ELISION_RE = /(?<!\p{L})(?:qu|[ldjcnmst])['’]\p{L}/iu;
+  const YOUTUBE_PHRASES = {
+    es: new Set(['resumen', 'entrevista', 'doblaje', 'partido', 'capitulo', 'temporada', 'episodio',
+      'especial', 'completo', 'completa', 'compilado', 'subtitulado', 'cancion', 'letra', 'receta',
+      'oficial', 'vivo', 'directo', 'pelicula', 'reaccion', 'noticias', 'mejores', 'jugadas']),
+    fr: new Set(['officiel', 'officielle', 'saison', 'extrait', 'integrale', 'complet', 'complete',
+      'tutoriel', 'direct', 'recette', 'nouveau', 'nouvelle', 'meilleur', 'meilleurs', 'vostfr', 'vf'])
+  };
+  // "ROSALÍA - SAOKO", "Panteón Rococó: Tiny Desk Concert": the part before
+  // the first dash/colon is usually an artist or show name, whose accents
+  // say nothing about the video's language.
+  const withoutLeadingName = (title) => {
+    const match = title.match(/^[^-–—:|]{2,40}?\s*(?:\s[-–—]\s|:\s)(.+)$/u);
+    return match ? match[1] : title;
+  };
+  // é alone is too common in names (Beyoncé, Pokémon), but two of them
+  // outside the leading name ("Résumé", "Méditation | Nettoyage émotionnel")
+  // are a real Spanish/French sign.
+  const hasRepeatedAcute = (title) => (withoutLeadingName(title).match(/é/gi) || []).length >= 2;
   const hasLanguageEvidence = (title, lang) =>
-    LANGUAGE_ACCENTS[lang]?.test(title)
-    || tokenize(title).some((word) => WORD_LISTS[lang]?.has(word));
+    LANGUAGE_ACCENTS[lang]?.test(withoutLeadingName(title))
+    || hasRepeatedAcute(title)
+    || (lang === 'fr' && FRENCH_ELISION_RE.test(title))
+    || tokenize(title).some((word) => WORD_LISTS[lang]?.has(word) || YOUTUBE_PHRASES[lang]?.has(word));
+  // Stricter: only what the language has and its neighbours (pt, ca, it)
+  // don't — for settling es/fr against them.
+  const TARGET_MARKERS = {
+    es: /[ñ¿¡á]|(?<!\p{L})(?:sin|y|los|las|una|unos|unas|muy|pero|esto|hay|ya|yo|hasta|desde|cuando|donde|porque|más|qué|cómo|sí|hace|aquí|así|nuevo|nueva|mejor|resumen|entrevista)(?!\p{L})|\p{L}{2,}iendo(?!\p{L})/iu,
+    fr: /[èùâêîôûœæ]|(?<!\p{L})(?:qu|[ldjcnmst])['’]\p{L}|(?<!\p{L})(?:les|des|du|au|aux|est|une|pour|avec|dans|sur|pas|qui|je|vous|nous|mon|ma|mes|ce|cette|très|où|officiel)(?!\p{L})/iu
+  };
+  const hasTargetMarkers = (title, lang) => Boolean(TARGET_MARKERS[lang]?.test(title));
+  // Common English words, minus ones Spanish/French share. A title with
+  // more of these than words of the guessed language is English around a
+  // name ("Wild West Shootout | El Camino", "Tour de France - Best Moments").
+  const ENGLISH_COMMON = new Set(['about', 'after', 'album', 'all', 'also', 'always', 'am', 'amazing', 'an', 'and', 'any', 'are', 'at', 'back', 'bad', 'battle', 'be', 'beach', 'been', 'before', 'behind', 'being', 'big', 'blood', 'but', 'by', 'can', 'car', 'card', 'cars', 'chill', 'city', 'coffee', 'coming', 'complete', 'cook', 'cooking', 'could', 'cover', 'crazy', 'dawn', 'day', 'days', 'despite', 'did', 'do', 'does', 'done', 'down', 'easy', 'eat', 'eating', 'epic', 'even', 'ever', 'every', 'everything', 'explained', 'fails', 'family', 'fast', 'fight', 'find', 'first', 'food', 'for', 'found', 'friend', 'friends', 'from', 'funny', 'game', 'games', 'get', 'girl', 'go', 'going', 'good', 'got', 'great', 'guide', 'guy', 'hacks', 'had', 'hard', 'has', 'hate', 'have', 'he', 'her', 'high', 'him', 'his', 'history', 'home', 'house', 'how', 'i', 'in', 'incredible', 'insane', 'inside', 'into', 'is', 'it', 'its', 'just', 'kid', 'kids', 'last', 'learn', 'learning', 'lesson', 'lessons', 'life', 'listen', 'listening', 'little', 'long', 'look', 'looking', 'lose', 'lost', 'love', 'low', 'made', 'make', 'making', 'man', 'may', 'men', 'might', 'moments', 'more', 'morning', 'most', 'music', 'must', 'my', 'never', 'next', 'night', 'not', 'nothing', 'of', 'off', 'old', 'on', 'only', 'or', 'our', 'out', 'outside', 'over', 'park', 'people', 'phrases', 'play', 'played', 'player', 'playing', 'practice', 'quick', 'recipe', 'road', 'room', 'scenes', 'see', 'seeing', 'sentences', 'she', 'shocking', 'shootout', 'shop', 'short', 'should', 'simple', 'slow', 'some', 'song', 'songs', 'speak', 'speaking', 'still', 'store', 'stories', 'story', 'street', 'stuff', 'talk', 'talking', 'that', 'the', 'their', 'them', 'these', 'they', 'thing', 'things', 'this', 'those', 'time', 'times', 'tips', 'to', 'today', 'tonight', 'travel', 'tricks', 'trip', 'triumph', 'truck', 'ultimate', 'up', 'us', 'very', 'was', 'watch', 'watching', 'way', 'ways', 'we', 'week', 'weekend', 'went', 'were', 'west', 'what', 'when', 'where', 'which', 'who', 'why', 'wild', 'will', 'win', 'wins', 'with', 'woman', 'women', 'won', 'words', 'world', 'worst', 'would', 'year', 'years', 'yes', 'you', 'young', 'your']);
+  const looksEnglish = (title, lang) => {
+    let english = 0;
+    let native = 0;
+    for (const word of tokenize(title)) {
+      if (ENGLISH_COMMON.has(word)) english++;
+      else if (WORD_LISTS[lang]?.has(word) || YOUTUBE_PHRASES[lang]?.has(word)) native++;
+    }
+    return english >= 2 && english > native;
+  };
+  const ENGLISH_MARKERS_RE = /(?<!\p{L})(?:the|to|of|and|my|with|your|is|are|was|for|on|this|that|how|what|why|you|it's|don't|i'm)(?!\p{L})|\p{L}{3,}ing(?!\p{L})/iu;
+
+  // Spellings and words a neighbouring language has and Spanish/French
+  // don't. They settle the close calls the model can't (es ~ ca/pt/it).
+  const RELATIVE_MARKERS = {
+    ca: /[òï]|l·l|(?<!\p{L})(?:amb|els|també|perquè|només|aquest|aquesta|aquests|aquestes|però|molt|dels|pels|això|avui|recepta|cuina|notícies|català|setmana|vaig|vam|meu|meva)(?!\p{L})/iu,
+    pt: /ção|ções|[ãõ]|(?<!\p{L})(?:e|do|da|das|ao|aos|em|não|você|vocês|muito|isso|isto|também|uma|com|pra|pros|minha|seu|sua|ele|eles|foi|tem|vai|fazer)(?!\p{L})/iu,
+    it: /(?<!\p{L})(?:gli|della|delle|dei|degli|sono|questo|questa|perché|più|anche|nella|nel|ho|cosa)(?!\p{L})/iu,
+    ro: /[ășțşţ]|(?<!\p{L})(?:și|în|pentru|este)(?!\p{L})/iu
+  };
+  // Catalan gerunds (-ant/-ent: "Reaccionant") — but not in the leading
+  // artist name ("Clarent & Quevedo - Jukiar").
+  const CATALAN_GERUND_RE = /\p{L}{4,}(?:ant|ent)(?!\p{L})/iu;
+  const hasRelativeMarkers = (title, lang) => Boolean(RELATIVE_MARKERS[lang]?.test(title))
+    || (lang === 'ca' && CATALAN_GERUND_RE.test(withoutLeadingName(title)));
+
+  // Languages kept in the model only to soak up names; they never win and
+  // don't count as a runner-up either.
+  const MODEL_NOISE_LANGS = new Set(['tl', 'sl', 'sv', 'pl']);
+
+  // Last resort before "unknown": letters or words only Spanish (or only
+  // French) has, none of a neighbour's, and not mostly English.
+  // Stricter than TARGET_MARKERS: no á (Portuguese, names like Málaga) and
+  // no â/ê/ô (Portuguese "Câmeras", "Inteligência").
+  const FALLBACK_MARKERS = {
+    es: /[ñ¿¡]|(?<!\p{L})(?:sin|y|los|las|una|unos|unas|muy|pero|esto|hay|ya|yo|hasta|desde|cuando|donde|porque|más|qué|cómo|sí|hace|aquí|así)(?!\p{L})|\p{L}{2,}iendo(?!\p{L})/iu,
+    fr: /[èùîûœæ]|(?<!\p{L})(?:qu|[ldjcnmst])['’]\p{L}|(?<!\p{L})(?:les|des|du|au|aux|est|une|pour|avec|dans|sur|pas|qui|je|vous|nous|mon|ma|mes|ce|cette|très|où)(?!\p{L})/iu
+  };
+  const guessFromMarkersAlone = (title) => {
+    const body = withoutLeadingName(title);
+    const es = FALLBACK_MARKERS.es.test(body);
+    const fr = FALLBACK_MARKERS.fr.test(body);
+    let lang = es === fr ? null : (es ? 'es' : 'fr');
+    // Only repeated é: let the model say which of the two it is.
+    if (!lang && !es && hasRepeatedAcute(title)) {
+      const top = globalThis.__ytlfLangModel?.score(title.replace(MODEL_NOISE_RE, ' ')).ranked
+        .find(([code]) => code === 'es' || code === 'fr');
+      lang = top ? top[0] : null;
+    }
+    if (!lang) return null;
+    if (Object.keys(RELATIVE_MARKERS).some((code) => hasRelativeMarkers(title, code))) return null;
+    if (looksEnglish(title, lang) || looksGalician(title)) return null;
+    return lang;
+  };
+
+  // Stock YouTube tags that say which language a release is in, whatever
+  // the (often English or invented) song/game name around them.
+  const STOCK_PHRASES = [
+    ['fr', /(?<!\p{L})(?:clip (?:officiel|vid[ée]o)|bande[- ]annonce|vostfr|let'?s play fr|gameplay fr)(?!\p{L})/iu],
+    ['es', /(?<!\p{L})(?:(?:video|videoclip|audio|tráiler) oficial|en vivo|doblaje latino|espa[ñn]ol latino)(?!\p{L})/iu]
+  ];
+  const stockPhraseLanguage = (title) => STOCK_PHRASES.find(([, re]) => re.test(title))?.[0] ?? null;
 
   const combineWithModel = (title, ruleGuess) => {
+    const stock = stockPhraseLanguage(title);
+    if (stock && !Object.keys(RELATIVE_MARKERS).some((code) => hasRelativeMarkers(title, code))) return stock;
     const guess = combineWithModelRaw(title, ruleGuess);
-    return guess === 'es' && looksGalician(title) ? 'gl' : guess;
+    if (guess === 'es' && looksGalician(title)) return 'gl';
+    if ((guess === 'es' || guess === 'fr') && looksEnglish(title, guess) && !hasTargetMarkers(title, guess)) return null;
+    if (guess === null) return guessFromMarkersAlone(title);
+    return guess;
   };
 
   const combineWithModelRaw = (title, ruleGuess) => {
     const model = globalThis.__ytlfLangModel;
     if (!model) return ruleGuess;
 
-    const { ranked, ngrams } = model.score(title.replace(MODEL_NOISE_RE, ' '));
+    const scored = model.score(title.replace(MODEL_NOISE_RE, ' '));
+    const { ngrams } = scored;
+    const ranked = scored.ranked.filter(([code]) => !MODEL_NOISE_LANGS.has(code));
     if (!ranked.length || ngrams < MODEL_TUNING.minNgrams) return ruleGuess;
+    if (MODEL_NOISE_LANGS.has(scored.ranked[0][0]) && scored.ranked[0][1] - ranked[0][1] > MODEL_TUNING.targetMargin) {
+      return ruleGuess; // names/brands outscore every real language
+    }
 
     const [top, topScore] = ranked[0];
-    const margin = topScore - (ranked[1]?.[1] ?? 0);
+    const [rival, rivalScore = 0] = ranked[1] || [];
+    const margin = topScore - rivalScore;
+    const scoreOf = (code) => ranked.find(([c]) => c === code)?.[1] ?? 0;
     if (top === ruleGuess) return ruleGuess;
+
+    // es/fr against a neighbour, too close for the model: decide by markers.
+    if (MODEL_TARGETS.has(top) && MODEL_RELATIVES.has(rival) && margin < MODEL_TUNING.targetMargin) {
+      if (hasRelativeMarkers(title, rival)) return rival;
+      if (!hasLanguageEvidence(title, top)) return ruleGuess;
+    } else if (MODEL_RELATIVES.has(top) && MODEL_TARGETS.has(rival)
+      && (margin < MODEL_TUNING.relativeMargin || ngrams < MODEL_TUNING.relativeMinNgrams)) {
+      if (hasRelativeMarkers(title, top)) return top;
+      if (rival !== 'en' && hasTargetMarkers(title, rival)) return rival;
+      return ruleGuess;
+    }
+
     if (MODEL_TARGETS.has(top)) {
-      const needed = ruleGuess ? MODEL_TUNING.overrideMargin : MODEL_TUNING.targetMargin;
-      if (margin < needed) return ruleGuess;
-      // Alone on a short title, the model is swayed by loanwords and names
-      // ("Error 37 Rage, Diablo 3 Rage!" → es); ask for one word or accent
-      // that is actually of that language.
-      if (!ruleGuess && top !== 'en' && ngrams < MODEL_TUNING.unbackedMinNgrams
-        && !hasLanguageEvidence(title, top)) return null;
+      // To overrule the rules, beat the rules' language itself.
+      if (ruleGuess && topScore - scoreOf(ruleGuess) < MODEL_TUNING.overrideMargin) return ruleGuess;
+      if (!ruleGuess && margin < MODEL_TUNING.targetMargin && !(MODEL_RELATIVES.has(rival))) return null;
+      // On its own the model is swayed by loanwords and names ("Error 37
+      // Rage, Diablo 3 Rage!" → es, "Fake Tortoise Rescue Situation" → fr);
+      // ask for one word, accent or elision that is actually of that language.
+      if (!ruleGuess && top !== 'en' && !hasLanguageEvidence(title, top)) return null;
+      // English around a Spanish/French name ("Reacting to La Casa de Papel
+      // Finale") has the name's la/de; only that language's own markers count.
+      if (!ruleGuess && top !== 'en' && ENGLISH_MARKERS_RE.test(title) && !hasTargetMarkers(title, top)) return null;
       return top;
     }
     if (MODEL_RELATIVES.has(top)
-      && margin >= MODEL_TUNING.relativeMargin
-      && ngrams >= MODEL_TUNING.relativeMinNgrams) return top;
+      && ((margin >= MODEL_TUNING.relativeMargin && ngrams >= MODEL_TUNING.relativeMinNgrams)
+        || hasRelativeMarkers(title, top))) return top;
     return ruleGuess;
   };
 
