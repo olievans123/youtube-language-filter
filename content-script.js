@@ -259,24 +259,22 @@
     'chinese'
   ]);
 
+  // Only counted next to the language word (see detectLanguageFromTitle).
+  const LEARNING_CONTEXT_ADJACENT = new Set([
+    'podcast', 'input', 'advanced', 'study', 'studying', 'course', 'courses', 'naturally',
+    'story', 'stories', 'conversation', 'listening', 'practice', 'vlog'
+  ]);
+
   const LEARNING_CONTEXT = new Set([
     'learn',
     'learning',
     'comprehensible',
-    'input',
-    'podcast',
     'vocabulary',
     'grammar',
     'lesson',
     'lessons',
     'beginner',
-    'intermediate',
-    'advanced',
-    'study',
-    'studying',
-    'course',
-    'courses',
-    'naturally'
+    'intermediate'
   ]);
 
   const ES_STRONG_KEYWORDS = new Set([
@@ -634,7 +632,14 @@
     const esWeakMatches = words.filter((word) => ES_WEAK_KEYWORDS.has(word)).length;
     const frStrongMatches = words.filter((word) => FR_STRONG_KEYWORDS.has(word)).length;
     const frWeakMatches = words.filter((word) => FR_WEAK_KEYWORDS.has(word)).length;
-    const learningMatches = words.filter((word) => LEARNING_CONTEXT.has(word)).length;
+    // Generic words ("podcast", "course") only count right next to the
+    // language name: "French Podcast" is learning content, "the pizza on a
+    // French onion soup | … Podcast" is not.
+    const languageWordAt = words.map((word) =>
+      ZH_WEAK_KEYWORDS.has(word) || ES_WEAK_KEYWORDS.has(word) || FR_WEAK_KEYWORDS.has(word));
+    const learningMatches = words.filter((word, i) => LEARNING_CONTEXT.has(word)
+      || (LEARNING_CONTEXT_ADJACENT.has(word) && (languageWordAt[i - 1] || languageWordAt[i + 1]
+        || (words[i + 1] === 'in' && languageWordAt[i + 2])))).length;
 
     if (zhStrongMatches >= 1) return 'zh';
     if (zhWeakMatches >= 1 && learningMatches >= 1) return 'zh';
