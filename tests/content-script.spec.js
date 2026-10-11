@@ -705,3 +705,51 @@ test.describe('UI-language metadata in aria-labels', () => {
     await expect(el(page, 'bbbbbbbbbbb')).not.toHaveAttribute(ATTR, 'fr');
   });
 });
+
+test.describe('channel language memory', () => {
+  const card = (id, title, channel) =>
+    `<ytd-rich-item-renderer data-test-id="${id}">` +
+    `<a href="/watch?v=${id}"><span id="video-title">${title}</span></a>` +
+    `<ytd-channel-name><a href="/@${channel}">${channel}</a></ytd-channel-name>` +
+    `</ytd-rich-item-renderer>`;
+
+  test('an unknown title takes its channel\'s language', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['es'], showUnknown: false }, [], {
+      html: [
+        card('aaaaaaaaaa1', 'Receta de tortilla de patatas fácil y rápida', 'cocina'),
+        card('aaaaaaaaaa2', 'Cómo hacer pan casero en una hora', 'cocina'),
+        card('aaaaaaaaaa3', 'Los mejores trucos para la paella perfecta', 'cocina'),
+        card('aaaaaaaaaa4', 'Tacos al Pastor', 'cocina')
+      ].join('')
+    });
+    await expect(el(page, 'aaaaaaaaaa4')).toHaveAttribute(ATTR, 'es');
+    await expect(el(page, 'aaaaaaaaaa4')).toBeVisible();
+    await expect(el(page, 'aaaaaaaaaa4')).toHaveAttribute('data-lang-filter-from-channel', 'es');
+  });
+
+  test('a mixed channel lends no language', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['es'], showUnknown: false }, [], {
+      html: [
+        card('bbbbbbbbbb1', 'Receta de tortilla de patatas fácil y rápida', 'mixto'),
+        card('bbbbbbbbbb2', 'How to make the perfect sourdough bread at home', 'mixto'),
+        card('bbbbbbbbbb3', 'Les meilleures recettes de la semaine pour toute la famille', 'mixto'),
+        card('bbbbbbbbbb4', 'Tacos al Pastor', 'mixto')
+      ].join('')
+    });
+    await expect(el(page, 'bbbbbbbbbb4')).toHaveAttribute(ATTR, 'unknown');
+    await expect(el(page, 'bbbbbbbbbb4')).toBeHidden();
+  });
+
+  test('a title-detected language is never overridden by the channel', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['es'], showUnknown: false }, [], {
+      html: [
+        card('cccccccccc1', 'Receta de tortilla de patatas fácil y rápida', 'canal'),
+        card('cccccccccc2', 'Cómo hacer pan casero en una hora', 'canal'),
+        card('cccccccccc3', 'Los mejores trucos para la paella perfecta', 'canal'),
+        card('cccccccccc4', 'How to make the perfect sourdough bread at home', 'canal')
+      ].join('')
+    });
+    await expect(el(page, 'cccccccccc4')).toHaveAttribute(ATTR, 'en');
+    await expect(el(page, 'cccccccccc4')).toBeHidden();
+  });
+});

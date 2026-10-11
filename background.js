@@ -148,5 +148,8 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 api.storage.onChanged.addListener((changes, areaName) => {
   if (areaName && areaName !== 'local') return;
+  // Only settings changes matter to tabs; the content script's own data
+  // (e.g. its channel-language memory) is written here too.
+  if (changes && !Object.keys(changes).some((key) => key in DEFAULTS)) return;
   broadcastConfig();
 });

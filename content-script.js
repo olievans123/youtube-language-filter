@@ -83,6 +83,8 @@
   const PROCESSED_ATTR = 'data-lang-filter-checked';
   const HIDDEN_ATTR = 'data-lang-filter-hidden';
   const RETRY_ATTR = 'data-lang-filter-retries';
+  // Set when a card's language came from its channel's history, not its title.
+  const CHANNEL_GUESS_ATTR = 'data-lang-filter-from-channel';
   const MAX_TITLE_RETRIES = 4;
   const BATCHING_CLASS = 'yt-lang-filter-batching';
   const MAX_BATCHING_MS = 850;
@@ -1064,8 +1066,12 @@
     if (!videoId) return;
 
     fetchOriginalTitle(videoId).then((originalTitle) => {
-      if (!originalTitle || originalTitle === domTitle) return;
+      if (!originalTitle) return;
       if (!videoElement.isConnected || !config.enabled) return;
+      if (originalTitle === domTitle) {
+        recordChannelVote(videoElement, domLanguage); // not a translation after all
+        return;
+      }
 
       if (config.restoreOriginalTitles) {
         replaceDisplayedTitle(videoElement, originalTitle, domTitle);
@@ -1074,7 +1080,10 @@
         videoElement.__ytlfOriginalTitle = { original: originalTitle, translated: domTitle };
       }
 
-      const language = getCachedLanguage(originalTitle);
+      const originalLanguage = getCachedLanguage(originalTitle);
+      recordChannelVote(videoElement, originalLanguage);
+      if (originalLanguage) videoElement.removeAttribute(CHANNEL_GUESS_ATTR);
+      const language = originalLanguage || channelLanguage(videoElement);
       if (language === domLanguage) return;
 
       if (config.keepSubscribed && isSubscribedChannel(videoElement)) {
@@ -1264,19 +1273,27 @@
         continue;
       }
 
-      const language = getCachedLanguage(title);
+      const titleLanguage = getCachedLanguage(title);
+      // A title in the UI language may be YouTube's translation; it only
+      // votes for its channel once the original title confirms it.
+      if (titleLanguage && titleLanguage !== uiLanguage && !isPlaylistCard(el)) {
+        recordChannelVote(el, titleLanguage);
+      }
+      const channelGuess = titleLanguage ? null : channelLanguage(el);
+      if (channelGuess) el.setAttribute(CHANNEL_GUESS_ATTR, channelGuess);
+      const language = titleLanguage || channelGuess;
 
       // Always show videos from subscribed channels
       if (config.keepSubscribed && isSubscribedChannel(el)) {
         el.setAttribute(PROCESSED_ATTR, language || 'unknown');
         el.removeAttribute(RETRY_ATTR);
         setCardHidden(el, false);
-        maybeRefineWithOriginalTitle(el, title, language);
+        maybeRefineWithOriginalTitle(el, title, titleLanguage);
         continue;
       }
 
       applyLanguageDecision(el, language, selectedLanguages);
-      maybeRefineWithOriginalTitle(el, title, language);
+      maybeRefineWithOriginalTitle(el, title, titleLanguage);
     }
 
     if (hasPendingElements) {
@@ -1308,6 +1325,7 @@
       el.removeAttribute(PROCESSED_ATTR);
       el.removeAttribute(HIDDEN_ATTR);
       el.removeAttribute(RETRY_ATTR);
+      el.removeAttribute(CHANNEL_GUESS_ATTR);
     });
 
     queueElements(document);
@@ -1594,10 +1612,124 @@
 
   // --- Bootstrap ---
 
+  // --- Channel language memory ---
+  // Titles alone can't place "ROSALÍA - BESO" or "Tacos al Pastor", but the
+  // channel's other videos can. Every confident classification is a vote
+  // for its channel; an unknown title takes its channel's language once
+  // that is clear. Kept in extension storage (or localStorage on the proxy).
+  const CHANNEL_MEMORY_KEY = 'channelLanguageVotes';
+  const CHANNEL_MEMORY_MAX = 3000;
+  const CHANNEL_MIN_VOTES = 3;
+  const CHANNEL_MIN_SHARE = 0.75;
+  const CHANNEL_VOTE_CAP = 30; // halve a channel's votes past this, so it can change
+  const channelMemory = new Map(); // channel → { v: { lang: votes }, t: last seen }
+  const votedVideos = new Set();
+  let channelMemorySaveTimer = null;
+
+  const loadChannelMemory = () => new Promise((resolve) => {
+    const apply = (stored) => {
+      if (stored && typeof stored === 'object') {
+        for (const [channel, entry] of Object.entries(stored)) {
+          if (entry?.v && !channelMemory.has(channel)) channelMemory.set(channel, entry);
+        }
+      }
+      resolve();
+    };
+    try {
+      if (storageArea) {
+        const result = storageArea.get(CHANNEL_MEMORY_KEY, (items) => apply(items?.[CHANNEL_MEMORY_KEY]));
+        if (result?.then) result.then((items) => apply(items?.[CHANNEL_MEMORY_KEY]), () => resolve());
+      } else {
+        apply(JSON.parse(localStorage.getItem(CHANNEL_MEMORY_KEY) || 'null'));
+      }
+    } catch {
+      resolve();
+    }
+  });
+
+  const saveChannelMemory = () => {
+    clearTimeout(channelMemorySaveTimer);
+    channelMemorySaveTimer = setTimeout(() => {
+      if (channelMemory.size > CHANNEL_MEMORY_MAX) {
+        const oldest = [...channelMemory].sort((a, b) => a[1].t - b[1].t);
+        for (const [channel] of oldest.slice(0, channelMemory.size - CHANNEL_MEMORY_MAX)) channelMemory.delete(channel);
+      }
+      const data = Object.fromEntries(channelMemory);
+      try {
+        if (storageArea) storageArea.set({ [CHANNEL_MEMORY_KEY]: data });
+        else localStorage.setItem(CHANNEL_MEMORY_KEY, JSON.stringify(data));
+      } catch {}
+    }, 2000);
+  };
+
+  const getCardChannel = (videoElement) => {
+    for (const link of videoElement.querySelectorAll(CHANNEL_LINK_SELECTORS)) {
+      const channel = normalizeChannelHref(link.getAttribute('href'));
+      if (channel) return channel;
+    }
+    // Cards on a channel's own page carry no channel link.
+    return normalizeChannelHref(location.pathname);
+  };
+
+  const channelLanguage = (videoElement) => {
+    const entry = channelMemory.get(getCardChannel(videoElement));
+    if (!entry) return null;
+    let total = 0;
+    let best = null;
+    for (const [lang, votes] of Object.entries(entry.v)) {
+      total += votes;
+      if (!best || votes > entry.v[best]) best = lang;
+    }
+    return total >= CHANNEL_MIN_VOTES && entry.v[best] / total >= CHANNEL_MIN_SHARE ? best : null;
+  };
+
+  const resolveUnknownCards = (onlyChannel = null) => {
+    if (!config.enabled) return;
+    const selectedLanguages = new Set(
+      normalizeLanguageArray(config.selectedLanguages ?? config.selectedLanguage)
+    );
+    for (const card of document.querySelectorAll(`[${PROCESSED_ATTR}="unknown"]`)) {
+      if (onlyChannel && getCardChannel(card) !== onlyChannel) continue;
+      const language = channelLanguage(card);
+      if (!language) continue;
+      card.setAttribute(CHANNEL_GUESS_ATTR, language);
+      if (config.keepSubscribed && isSubscribedChannel(card)) {
+        card.setAttribute(PROCESSED_ATTR, language);
+        continue;
+      }
+      applyLanguageDecision(card, language, selectedLanguages);
+    }
+  };
+
+  // One vote per video per page load; never from a channel-based guess.
+  const recordChannelVote = (videoElement, language) => {
+    if (!language) return;
+    const channel = getCardChannel(videoElement);
+    if (!channel) return;
+    const videoKey = getVideoId(videoElement) || collapseWhitespace(extractTitleText(videoElement));
+    if (!videoKey || votedVideos.has(videoKey)) return;
+    votedVideos.add(videoKey);
+
+    const entry = channelMemory.get(channel) || { v: {}, t: 0 };
+    entry.v[language] = (entry.v[language] || 0) + 1;
+    entry.t = Date.now();
+    const total = Object.values(entry.v).reduce((sum, votes) => sum + votes, 0);
+    if (total > CHANNEL_VOTE_CAP) {
+      for (const lang of Object.keys(entry.v)) {
+        entry.v[lang] = Math.floor(entry.v[lang] / 2);
+        if (!entry.v[lang]) delete entry.v[lang];
+      }
+    }
+    channelMemory.set(channel, entry);
+    saveChannelMemory();
+    resolveUnknownCards(channel);
+  };
+
   const bootstrap = () => {
     injectFilterCSS();
     subscribeToConfigChanges();
     subscribeToStorageChanges();
+    loadChannelMemory().then(() => resolveUnknownCards());
 
     loadConfig().then(() => {
       lastRouteKey = getCurrentRouteKey();
