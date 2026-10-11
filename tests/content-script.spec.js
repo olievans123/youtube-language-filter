@@ -442,13 +442,14 @@ test.describe('original title restoration', () => {
     await expect(el(page, 'abcdef12345')).toBeVisible();
   });
 
-  test('does not touch titles when the feature is disabled', async ({ page }) => {
+  test('with the feature disabled, keeps the displayed title but still classifies by the original', async ({ page }) => {
     await setup(page, { selectedLanguage: 'en', restoreOriginalTitles: false }, [
       { id: 'abcdef12345', title: 'The Best Moments of the Week' }
     ], {
       oembedTitles: { abcdef12345: 'Les meilleurs moments de la semaine' }
     });
-    await expect(el(page, 'abcdef12345')).toHaveAttribute(ATTR, 'en');
+    await expect(el(page, 'abcdef12345')).toHaveAttribute(ATTR, 'fr');
+    await expect(el(page, 'abcdef12345')).toBeHidden();
     await expect(el(page, 'abcdef12345').locator('#video-title')).toHaveText('The Best Moments of the Week');
   });
 

@@ -913,8 +913,11 @@
     return false;
   };
 
+  // Always checks the original title for classification (a title shown in
+  // the UI language may be YouTube's auto-translation); the "Original
+  // titles" setting only decides whether the card displays it.
   const maybeRefineWithOriginalTitle = (videoElement, domTitle, domLanguage) => {
-    if (!config.enabled || !config.restoreOriginalTitles) return;
+    if (!config.enabled) return;
     // A title already detected as a non-UI language cannot be a translation.
     if (domLanguage !== null && domLanguage !== uiLanguage) return;
     // Undetected CJK/kana/hangul titles are not translations into a Latin UI.
@@ -929,10 +932,12 @@
       if (!originalTitle || originalTitle === domTitle) return;
       if (!videoElement.isConnected || !config.enabled) return;
 
-      replaceDisplayedTitle(videoElement, originalTitle, domTitle);
-      // YouTube's hydration can re-render the translated title over our
-      // replacement; remember the swap so the observer can re-assert it.
-      videoElement.__ytlfOriginalTitle = { original: originalTitle, translated: domTitle };
+      if (config.restoreOriginalTitles) {
+        replaceDisplayedTitle(videoElement, originalTitle, domTitle);
+        // YouTube's hydration can re-render the translated title over our
+        // replacement; remember the swap so the observer can re-assert it.
+        videoElement.__ytlfOriginalTitle = { original: originalTitle, translated: domTitle };
+      }
 
       const language = getCachedLanguage(originalTitle);
       if (language === domLanguage) return;
