@@ -4,13 +4,16 @@
   "description": "",
   "main": "content-script.js",
   "scripts": {
-    "test": "playwright test --project=chromium"
+    "test": "playwright test --project=chromium",
+    "eval:lang": "node tests/lang-eval/eval.js",
+    "build:lang-model": "node tools/build-lang-model.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "@playwright/test": "^1.58.2"
+    "@playwright/test": "^1.58.2",
+    "eld": "^2.1.0"
   }
 }

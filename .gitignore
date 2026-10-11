@@ -2,3 +2,4 @@ node_modules/
 test-results/
 .DS_Store
 YouTubeLanguageFilter/
+tests/lang-eval/titles-history.json

@@ -627,6 +627,15 @@
     if (esWeakMatches >= 1 && learningMatches >= 1) return 'es';
     if (frWeakMatches >= 1 && learningMatches >= 1) return 'fr';
 
+    // Inverted punctuation is unambiguously Spanish.
+    if (/[¿¡]/.test(title)) return 'es';
+
+    return combineWithModel(title, detectLatinByRules(title, words));
+  };
+
+  // Hand-written Latin-script rules: keyword lists, accents, elisions and a
+  // function-word vote. Used as the fallback when the n-gram model is unsure.
+  const detectLatinByRules = (title, words) => {
     const hasSpanishAccent = /[áéíóúñ]/i.test(title);
     const hasFrenchAccent = /[àâçéèêëîïôûùüÿœæ]/i.test(title);
     const spanishKeywordMatches = words.filter((word) => ES_KEYWORDS.has(word)).length;
@@ -698,6 +707,61 @@
     if (bestCount <= secondCount) return null;
 
     return bestLang;
+  };
+
+  // --- N-gram model (lang-model.js, loaded before this script) ---
+  // Character n-grams cope with short and accent-free titles, and they score
+  // Portuguese, Catalan, Italian etc. as themselves instead of as Spanish or
+  // French. Thresholds are tuned with tests/lang-eval.
+  const MODEL_TUNING = {
+    minNgrams: 2,          // fewer distinct n-grams than this → too little text, use rules
+    targetMargin: 0.04,    // en/es/fr winner must beat the runner-up by this much…
+    overrideMargin: 0.05,  // …and by this much to overrule a different rules answer
+    relativeMargin: 0.05,  // a neighbouring language (pt, ca…) needs this much to be named
+    relativeMinNgrams: 6   // …and this much text: short es/fr titles look like anything
+  };
+  const MODEL_TARGETS = new Set(['en', 'es', 'fr']);
+  // Languages easily mistaken for es/fr. Naming one hides the card (it isn't
+  // selectable) — that's the point. Other model outputs (tl, sl, yo…) are
+  // mostly noise from proper nouns, so they never override anything.
+  const MODEL_RELATIVES = new Set(['pt', 'it', 'ca', 'ro', 'de', 'nl']);
+  // Boilerplate that says nothing about the video's language.
+  const MODEL_NOISE_RE = /(?:https?:\/\/|[#@])\S+|\p{N}+|\p{Extended_Pictographic}|\b(?:official|music|video|audio|lyrics?|visuali[sz]er|live|remix|feat|ft|prod|gameplay|trailer|teaser|ep|hd|4k|shorts?|vlog|full|clip|cover)\b/giu;
+
+  // The model has no Galician, which it scores as Spanish or Portuguese.
+  // These words don't occur in Spanish, so two of them flip an es answer.
+  const GALICIAN_MARKERS = new Set([
+    'unha', 'unhas', 'moi', 'tamen', 'xa', 'coa', 'coas', 'polo', 'pola', 'polos', 'polas',
+    'ao', 'aos', 'lle', 'lles', 'mina', 'dende', 'cando', 'xente', 'xogo', 'xogar', 'hoxe',
+    'ainda', 'grazas', 'onte', 'mana', 'viches', 'facer', 'cartos', 'aforrar', 'consellos',
+    'novas', 'certo', 'incrible', 'sobe', 'non', 'pasou', 'despois', 'noite'
+  ]);
+  const looksGalician = (title) =>
+    tokenize(title).filter((word) => GALICIAN_MARKERS.has(word)).length >= 2;
+
+  const combineWithModel = (title, ruleGuess) => {
+    const guess = combineWithModelRaw(title, ruleGuess);
+    return guess === 'es' && looksGalician(title) ? 'gl' : guess;
+  };
+
+  const combineWithModelRaw = (title, ruleGuess) => {
+    const model = globalThis.__ytlfLangModel;
+    if (!model) return ruleGuess;
+
+    const { ranked, ngrams } = model.score(title.replace(MODEL_NOISE_RE, ' '));
+    if (!ranked.length || ngrams < MODEL_TUNING.minNgrams) return ruleGuess;
+
+    const [top, topScore] = ranked[0];
+    const margin = topScore - (ranked[1]?.[1] ?? 0);
+    if (top === ruleGuess) return ruleGuess;
+    if (MODEL_TARGETS.has(top)) {
+      const needed = ruleGuess ? MODEL_TUNING.overrideMargin : MODEL_TUNING.targetMargin;
+      return margin >= needed ? top : ruleGuess;
+    }
+    if (MODEL_RELATIVES.has(top)
+      && margin >= MODEL_TUNING.relativeMargin
+      && ngrams >= MODEL_TUNING.relativeMinNgrams) return top;
+    return ruleGuess;
   };
 
   // --- Filtering ---

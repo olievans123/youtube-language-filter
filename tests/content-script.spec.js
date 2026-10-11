@@ -2,6 +2,7 @@ const { test, expect } = require('@playwright/test');
 const path = require('path');
 
 const SCRIPT = path.resolve(__dirname, '..', 'content-script.js');
+const MODEL = path.resolve(__dirname, '..', 'lang-model.js');
 const ATTR = 'data-lang-filter-checked';
 
 function videoEl(id, title) {
@@ -81,6 +82,7 @@ async function setup(page, cfg, videos, {
     }
   }, { c: merged, pathUrl: url, mockFeedHtml: feedHtml, mockOembedTitles: oembedTitles });
 
+  await page.addScriptTag({ path: MODEL });
   await page.addScriptTag({ path: SCRIPT });
 
   if (waitForAttr) {
@@ -266,16 +268,16 @@ test.describe('language detection', () => {
     await setup(page, { selectedLanguage: 'fr', showUnknown: true }, [
       { id: 'v1', title: 'FULL EPISODE | Season 22 Episode 1 | Mock The Week' }
     ]);
-    await expect(el(page, 'v1')).toBeVisible();
-    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'unknown');
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'en');
   });
 
   test('does not classify English title about Chinese topic as Chinese language', async ({ page }) => {
     await setup(page, { selectedLanguage: 'zh', showUnknown: true }, [
       { id: 'v1', title: "The Strange Reason Chinese Doesn't Borrow Words" }
     ]);
-    await expect(el(page, 'v1')).toBeVisible();
-    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'unknown');
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'en');
   });
 
   test('detects French learning content from keyword + context', async ({ page }) => {
@@ -314,8 +316,8 @@ test.describe('language detection', () => {
     await setup(page, { selectedLanguage: 'es', showUnknown: true }, [
       { id: 'v1', title: 'The Spanish Civil War Documentary' }
     ]);
-    await expect(el(page, 'v1')).toBeVisible();
-    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'unknown');
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'en');
   });
 
   test('detects espanol as strong Spanish keyword', async ({ page }) => {
@@ -646,5 +648,31 @@ test.describe('subscription bypass', () => {
     );
 
     await expect(el(page, 'feedSub')).toBeVisible();
+  });
+});
+
+test.describe('n-gram model', () => {
+  test('hides Portuguese instead of treating it as Spanish', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['es'], showUnknown: true }, [
+      { id: 'v1', title: 'Eu e meus amigos tentamos sobreviver 24 horas na floresta' }
+    ]);
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'pt');
+  });
+
+  test('hides Catalan instead of treating it as French or Spanish', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['es', 'fr'], showUnknown: true }, [
+      { id: 'v1', title: "Ressenya de l'iPhone 16 Pro després de 30 dies amb tots els detalls" }
+    ]);
+    await expect(el(page, 'v1')).toBeHidden();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'ca');
+  });
+
+  test('detects an accent-free French title the word lists miss', async ({ page }) => {
+    await setup(page, { selectedLanguages: ['fr'], showUnknown: false }, [
+      { id: 'v1', title: 'TOURNOI DES MEILLEURS SNACKS' }
+    ]);
+    await expect(el(page, 'v1')).toBeVisible();
+    await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'fr');
   });
 });
