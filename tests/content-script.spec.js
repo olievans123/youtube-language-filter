@@ -753,3 +753,22 @@ test.describe('channel language memory', () => {
     await expect(el(page, 'cccccccccc4')).toBeHidden();
   });
 });
+
+test.describe('collections', () => {
+  test('hides playlist and podcast cards whatever their title says', async ({ page }) => {
+    const html =
+      '<ytd-rich-item-renderer data-test-id="pl1"><yt-lockup-view-model>' +
+      '<a href="/watch?v=abcdef12345&list=PLqR5zsynP8iv7sfeEl60t9B3lnUBaKABP"><yt-collection-thumbnail-view-model></yt-collection-thumbnail-view-model></a>' +
+      '<h3><a href="/playlist?list=PLqR5zsynP8iv7sfeEl60t9B3lnUBaKABP">Las mejores canciones de la semana</a></h3>' +
+      '</yt-lockup-view-model></ytd-rich-item-renderer>' +
+      '<ytd-rich-item-renderer data-test-id="pod1"><yt-lockup-view-model>' +
+      '<a href="/show/VLPLD0666ZhOzwjxqDq_sETY1MgJ5yDLQBDb"></a>' +
+      '<h3><a href="/playlist?list=PLD0666ZhOzwjxqDq_sETY1MgJ5yDLQBDb">La pause café (pour apprendre le français)</a></h3>' +
+      '</yt-lockup-view-model></ytd-rich-item-renderer>';
+    await setup(page, { selectedLanguages: ['es', 'fr'], showUnknown: true }, [], { html });
+    await expect(el(page, 'pl1')).toHaveAttribute(ATTR, 'playlist');
+    await expect(el(page, 'pl1')).toBeHidden();
+    await expect(el(page, 'pod1')).toHaveAttribute(ATTR, 'playlist');
+    await expect(el(page, 'pod1')).toBeHidden();
+  });
+});

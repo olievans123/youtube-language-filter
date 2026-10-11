@@ -1244,6 +1244,9 @@
 
   const isMixCard = (videoElement) =>
     Boolean(videoElement.querySelector?.('a[href*="list=RD"], a[href*="start_radio=1"]'));
+  // A playlist or podcast card (not a video card that merely carries list=).
+  const isCollectionCard = (videoElement) =>
+    Boolean(videoElement.querySelector?.('a[href^="/playlist"], a[href^="/show/"], yt-collection-thumbnail-view-model, ytd-playlist-thumbnail'));
 
   const processVideoElements = () => {
     if (!config.enabled) {
@@ -1268,10 +1271,10 @@
       if (!el?.isConnected) continue;
       if (el.hasAttribute(PROCESSED_ATTR)) continue;
 
-      // YouTube's auto-generated Mixes (radio playlists, list=RD…) are
-      // always hidden: they follow the seed song into any language.
-      if (isMixCard(el)) {
-        el.setAttribute(PROCESSED_ATTR, 'mix');
+      // Mixes (list=RD…), playlists and podcast shows are always hidden:
+      // their titles don't say what language the videos inside are in.
+      if (isMixCard(el) || isCollectionCard(el)) {
+        el.setAttribute(PROCESSED_ATTR, isMixCard(el) ? 'mix' : 'playlist');
         el.removeAttribute(RETRY_ATTR);
         setCardHidden(el, true);
         continue;
