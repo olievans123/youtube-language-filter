@@ -1242,6 +1242,9 @@
     }, MAX_BATCHING_MS);
   };
 
+  const isMixCard = (videoElement) =>
+    Boolean(videoElement.querySelector?.('a[href*="list=RD"], a[href*="start_radio=1"]'));
+
   const processVideoElements = () => {
     if (!config.enabled) {
       stopBatching();
@@ -1264,6 +1267,15 @@
       const el = findCardRoot(candidate) || candidate;
       if (!el?.isConnected) continue;
       if (el.hasAttribute(PROCESSED_ATTR)) continue;
+
+      // YouTube's auto-generated Mixes (radio playlists, list=RD…) are
+      // always hidden: they follow the seed song into any language.
+      if (isMixCard(el)) {
+        el.setAttribute(PROCESSED_ATTR, 'mix');
+        el.removeAttribute(RETRY_ATTR);
+        setCardHidden(el, true);
+        continue;
+      }
 
       const title = collapseWhitespace(extractTitleText(el));
       if (!title || title.length < 2) {

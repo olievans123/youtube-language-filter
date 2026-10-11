@@ -219,7 +219,7 @@ test.describe('language detection', () => {
     await expect(el(page, 'v1')).toHaveAttribute(ATTR, 'zh');
   });
 
-  test('detects language from mix aria-label when title text is generic', async ({ page }) => {
+  test('hides YouTube Mixes even when the seed song is in a selected language', async ({ page }) => {
     await setup(
       page,
       { selectedLanguage: 'es' },
@@ -228,8 +228,8 @@ test.describe('language detection', () => {
         html: mixEl('mix1', 'Mix - BAD BUNNY - YO PERREO SOLA | YHLQMDLG (Video Oficial)')
       }
     );
-    await expect(el(page, 'mix1')).toBeVisible();
-    await expect(el(page, 'mix1')).toHaveAttribute(ATTR, 'es');
+    await expect(el(page, 'mix1')).toBeHidden();
+    await expect(el(page, 'mix1')).toHaveAttribute(ATTR, 'mix');
   });
 
   test('detects French from long mixed-case title with numbers', async ({ page }) => {
